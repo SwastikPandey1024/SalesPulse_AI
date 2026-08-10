@@ -16,54 +16,66 @@ The system utilizes a **decoupled, multi-layered architecture** comprising:
 
 ```mermaid
 graph TD
-    subgraph Client Layer
-        UI[Streamlit Web UI / Browser]
+    subgraph Client ["Client Layer"]
+        UI["Streamlit Web UI / Browser"]
     end
 
-    subgraph Presentation & Application Layer (app.py)
-        Router[Tab Router & Control Pane]
-        Tab1[🔮 Single Day Prediction]
-        Tab2[📈 Multi-Horizon Forecast]
-        Tab3[🎯 Scenario Simulator]
-        Tab4[📊 Superstore EDA Explorer]
-        Tab5[🏆 Model Benchmarks]
-        Tab6[📁 Smart Batch Processing]
+    subgraph Presentation ["Presentation & Application Layer"]
+        Router["Tab Router & Control Pane"]
+        Tab1["Single Day Prediction"]
+        Tab2["Multi Horizon Forecast"]
+        Tab3["Scenario Simulator"]
+        Tab4["Superstore EDA Explorer"]
+        Tab5["Model Benchmarks"]
+        Tab6["Smart Batch Processing"]
     end
 
-    subgraph Business Logic & Analytics Engine
-        Val[Strict 3-Layer Input Validator]
-        FeatEng[Temporal & Rolling Feature Extractor]
-        Insights[Contextual Business Insights Engine]
-        Scenario[What-If Revenue Impact Calculator]
+    subgraph BusinessLogic ["Business Logic & Analytics Engine"]
+        Val["Strict 3-Layer Input Validator"]
+        FeatEng["Temporal & Rolling Feature Extractor"]
+        Insights["Contextual Business Insights Engine"]
+        Scenario["What-If Revenue Impact Calculator"]
     end
 
-    subgraph Machine Learning & Model Layer
-        ML_Mgr[Model Loader & Schema Verifier]
-        XGB[⚡ XGBoost Regressor Pipeline]
-        RF[🌲 RandomForest Regressor Pipeline]
-        Ens[🎯 Weighted Ensemble Predictor]
+    subgraph MLLayer ["Machine Learning & Model Layer"]
+        ML_Mgr["Model Loader & Schema Verifier"]
+        XGB["XGBoost Regressor Pipeline"]
+        RF["RandomForest Regressor Pipeline"]
+        Ens["Weighted Ensemble Predictor"]
     end
 
-    subgraph Data & Storage Layer
-        CSV[(Sample - Superstore.csv)]
-        PKL_XGB[(model.pkl Artifact)]
-        PKL_RF[(rf_model.pkl Artifact)]
+    subgraph DataLayer ["Data & Storage Layer"]
+        CSV[("Sample - Superstore.csv")]
+        PKL_XGB[("model.pkl Artifact")]
+        PKL_RF[("rf_model.pkl Artifact")]
     end
 
     UI --> Router
-    Router --> Tab1 & Tab2 & Tab3 & Tab4 & Tab5 & Tab6
+    Router --> Tab1
+    Router --> Tab2
+    Router --> Tab3
+    Router --> Tab4
+    Router --> Tab5
+    Router --> Tab6
     
-    Tab1 & Tab2 & Tab3 & Tab6 --> Val
+    Tab1 --> Val
+    Tab2 --> Val
+    Tab3 --> Val
+    Tab6 --> Val
     Val --> FeatEng
     FeatEng --> ML_Mgr
     
-    ML_Mgr --> XGB & RF
-    XGB & RF --> Ens
+    ML_Mgr --> XGB
+    ML_Mgr --> RF
+    XGB --> Ens
+    RF --> Ens
     
-    Ens --> Insights & Scenario
+    Ens --> Insights
+    Ens --> Scenario
     
     Tab4 --> CSV
-    ML_Mgr --> PKL_XGB & PKL_RF
+    ML_Mgr --> PKL_XGB
+    ML_Mgr --> PKL_RF
 ```
 
 ---
@@ -102,7 +114,7 @@ graph TD
   - Automatically handles model schema mismatches by activating XGBoost fallback to ensure zero runtime crashes.
 
 ### 3.3 Multi-Horizon Forecasting Engine
-- ** horizons:** 7-Day, 14-Day, 30-Day horizons.
+- **Forecast Horizons:** 7-Day, 14-Day, 30-Day horizons.
 - **Algorithm:** Iterative auto-regressive loop updating lag and rolling metrics dynamically after each step prediction.
 - **Confidence Intervals (95% Prediction Bounds):**
   $$\text{Upper} = y + 1.96 \cdot \max(10.0, \sigma_7) \cdot \sqrt{\frac{i}{2}}$$
@@ -125,7 +137,7 @@ graph TD
 ```mermaid
 sequenceDiagram
     autonumber
-    actor User
+    actor User as User
     participant UI as Streamlit Dashboard
     participant Val as Validation Engine
     participant ML as ML Inference Manager
