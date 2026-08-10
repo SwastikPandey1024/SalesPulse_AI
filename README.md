@@ -4,7 +4,7 @@
 ### *Intelligent Enterprise Sales Analytics, Multi-Horizon Forecasting & Business Simulation Engine*
 
 [![Release v2.0](https://img.shields.io/badge/Release-v2.0.0-4F46E5?style=for-the-badge&logo=github)](https://github.com/SwastikPandey1024/SalesPulse_AI)
-[![Streamlit Cloud Live](https://img.shields.io/badge/Live_App-SalesPulse_AI-FF4B4B?style=for-the-badge&logo=streamlit)](https://salespulseai.streamlit.app)
+[![Streamlit Cloud Live](https://img.shields.io/badge/Live_App-salespulseai.streamlit.app-FF4B4B?style=for-the-badge&logo=streamlit)](https://salespulseai.streamlit.app)
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python)](https://www.python.org/)
 [![XGBoost](https://img.shields.io/badge/Model-XGBoost-1572B6?style=for-the-badge&logo=xgboost)](https://xgboost.readthedocs.io/)
 [![RandomForest](https://img.shields.io/badge/Model-RandomForest-22C55E?style=for-the-badge&logo=scikitlearn)](https://scikit-learn.org/)
@@ -13,11 +13,31 @@
 
 **[🚀 Launch Live Web App](https://salespulseai.streamlit.app)** • **[📖 Architecture Specs (PRD)](docs/PRD.md)** • **[🌐 Deployment Guide](DEPLOYMENT.md)**
 
+<br/>
+
+![SalesPulse AI v2.0 Banner](images/hero_overview.png)
+
 </div>
 
 <br/>
 
 > ⚡ **SalesPulse AI v2.0** turns complex retail time-series data into high-precision sales forecasts, 95% confidence intervals, and dynamic business scenarios using an ensemble of XGBoost and RandomForest models.
+
+---
+
+### 🖼️ Application Showcase (v2.0 Visual Gallery)
+
+| Tab 1: Single Prediction | Tab 2: Multi-Day Forecast |
+| :---: | :---: |
+| ![Single Prediction](images/single_prediction.png) | ![Multi Day Forecast](images/multi_day_forecast.png) |
+
+| Tab 3: Scenario Simulator | Tab 4: Superstore EDA Explorer |
+| :---: | :---: |
+| ![Scenario Simulator](images/scenario_simulator.png) | ![Superstore EDA](images/eda_analytics.png) |
+
+| Tab 5: Model Benchmarks | Tab 6: Smart Batch Processing |
+| :---: | :---: |
+| ![Model Benchmarks](images/model_benchmarks.png) | ![Batch Predictions](images/batch_predictions.png) |
 
 ---
 

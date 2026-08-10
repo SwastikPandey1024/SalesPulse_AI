@@ -42,10 +42,10 @@ git push origin main
 
 1. Click the **"New App"** button (top right of your dashboard).
 2. Fill in the deployment details:
-   - **Repository:** `SwastikPandey1024/MLmodelStreamlit` (or your repository name)
+   - **Repository:** `SwastikPandey1024/SalesPulse_AI`
    - **Branch:** `main`
    - **Main file path:** `app.py`
-   - **App URL (optional):** Custom domain slug (e.g. `salespulse-ai`)
+   - **App URL:** [https://salespulseai.streamlit.app](https://salespulseai.streamlit.app)
 
 ---
 
@@ -53,7 +53,7 @@ git push origin main
 
 1. Click **"Deploy!"**.
 2. Streamlit Cloud will automatically build the environment, install packages from `requirements.txt`, load `model.pkl`, and launch your app.
-3. Once built, your live URL will be active (e.g. `https://salespulse-ai.streamlit.app`).
+3. Once built, your live URL will be active at: **[https://salespulseai.streamlit.app](https://salespulseai.streamlit.app)**.
 
 ---
 
