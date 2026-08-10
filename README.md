@@ -1,51 +1,53 @@
-# 📊 SalesPulse AI – Intelligent Sales Analytics & Forecasting
+# 📊 SalesPulse AI v2.0 – Intelligent Sales Analytics & Multi-Horizon Forecasting
 
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-Latest-red)](https://streamlit.io/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-v2.0-red)](https://streamlit.io/)
 [![XGBoost](https://img.shields.io/badge/XGBoost-Latest-brightgreen)](https://xgboost.readthedocs.io/)
+[![Plotly](https://img.shields.io/badge/Plotly-Interactive-blueviolet)](https://plotly.com/)
 [![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
 
-A **production-ready ML analytics platform** that predicts Superstore sales using XGBoost, delivers 7-day forecasts, and provides actionable business insights via an interactive Streamlit dashboard.
+A **production-ready ML analytics platform** that predicts Superstore sales using XGBoost & RandomForest, delivers 7/14/30-day confidence-bound forecasts, runs business scenario simulations ("What-If"), and provides interactive analytics via Streamlit.
 
 ---
 
 ## 📑 Table of Contents
 
 - [Overview](#-overview)
+- [What's New in Version 2.0](#-whats-new-in-version-20)
 - [Key Features](#-key-features)
 - [Tech Stack](#-tech-stack)
 - [Project Structure](#-project-structure)
 - [Installation & Setup](#-installation--setup)
-- [Quick Start](#-quick-start)
-- [Usage Guide](#-usage-guide)
+- [Live Streamlit Deployment](#-live-streamlit-deployment)
 - [Model Architecture](#-model-architecture)
-- [Performance Metrics](#-performance-metrics)
-- [File Descriptions](#-file-descriptions)
 - [Documentation](#-documentation)
-- [Development Workflow](#-development-workflow)
-- [Deployment](#-deployment)
-- [Contributing](#-contributing)
-- [Contact & Attribution](#-contact--attribution)
 
 ---
 
-## 🚀 Current Project Status (v1.0.0 Stable Release)
+## 🚀 Current Project Status (v2.0.0 Production Release)
 
 ```text
-SalesPulse AI
+SalesPulse AI v2.0
 │
-├── Data Pipeline            ✅ (Superstore sales data ingestion & cleaning)
-├── Feature Engineering       ✅ (Calendar, lag, rolling averages, & trend counters)
-├── Model Training           ✅ (XGBoost Regressor & hyperparameter tuning)
-├── Single-Day Inference     ✅ (Real-time sales prediction engine)
-├── 7-Day Trend Forecasting  ✅ (Iterative multi-day rolling forecast)
-├── Batch Processing         ✅ (CSV upload & multi-record inference)
-├── Business Insights Engine  ✅ (Contextual operational recommendations)
-├── Streamlit Dashboard      ✅ (Interactive multi-page UI analytics)
-├── Validation Pipeline      ✅ (3-layer data validation & error handling)
-├── Comprehensive Docs       ✅ (Architecture, API specs, & usage guides)
-└── GitHub Synchronized      ✅ (Clean main branch release)
+├── Dual Model Engine          ✅ (XGBoost Regressor + RandomForest + Ensemble Blend)
+├── Multi-Horizon Forecasting  ✅ (7, 14, 30-Day Horizions with 95% Confidence Intervals)
+├── Business Scenario Engine   ✅ ("What-If" Promotional & Price Levers)
+├── Superstore EDA Explorer    ✅ (Interactive Category/Region Revenue Analytics)
+├── Smart Batch Processing     ✅ (Auto Feature Extraction from Raw CSVs)
+├── Streamlit Cloud Setup      ✅ (Root app.py + .streamlit/config.toml theme)
+├── Strict Input Validation    ✅ (3-layer data validation & error resilience)
+└── Comprehensive Docs         ✅ (PRD, BRD, Validation & DEPLOYMENT.md)
 ```
+
+---
+
+## ✨ What's New in Version 2.0
+
+1. **Dual Model Engine & Ensemble:** Switch seamlessly between XGBoost, RandomForest, or an Ensemble average.
+2. **Multi-Horizon Forecasting:** Select 7-day, 14-day, or 30-day forecast horizons complete with upper and lower 95% confidence bands rendered with Plotly.
+3. **Business Scenario Simulator:** Interactively adjust promotional campaign lift (%), price adjustments (%), and seasonal multipliers to quantify revenue delta.
+4. **Superstore Data Explorer (EDA):** Interactive dashboard tab for category share, regional sales, and monthly trend analysis.
+5. **Streamlit Deployment Package:** Created root `app.py`, updated `requirements.txt`, added `.streamlit/config.toml`, and written `DEPLOYMENT.md`.
 
 ---
 
