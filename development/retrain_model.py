@@ -1,14 +1,15 @@
 """
-PRODUCTION MODEL RETRAINING SCRIPT
+PRODUCTION MODEL RETRAINING SCRIPT (v2.0)
 
-Retrains XGBoost using ONLY engineered features.
-Features match EXACTLY what app.py sends.
+Retrains both XGBoost and RandomForest models using ONLY engineered features.
+Features match EXACTLY what app.py sends (13 features).
 """
 
 import pandas as pd
 import numpy as np
 import joblib
 from xgboost import XGBRegressor
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error
 import os
 
@@ -16,7 +17,8 @@ import os
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 model_data_path = os.path.join(project_root, 'model_data')
 csv_file = os.path.join(model_data_path, 'Sample - Superstore.csv')
-model_output = os.path.join(model_data_path, 'model.pkl')
+xgb_output = os.path.join(model_data_path, 'model.pkl')
+rf_output = os.path.join(model_data_path, 'rf_model.pkl')
 
 # Load data
 print('Loading data...')
@@ -50,9 +52,9 @@ ENGINEERED_FEATURES = [
 ]
 
 print('=' * 80)
-print('PRODUCTION MODEL RETRAINING')
+print('PRODUCTION DUAL MODEL RETRAINING (v2.0)')
 print('=' * 80)
-print(f'\nUsing {len(ENGINEERED_FEATURES)} engineered features')
+print(f'\nUsing {len(ENGINEERED_FEATURES)} engineered features:')
 for i, feat in enumerate(ENGINEERED_FEATURES, 1):
     print(f'  {i:2d}. {feat}')
 
@@ -61,15 +63,6 @@ print('\nBuilding training dataset...')
 X = df[ENGINEERED_FEATURES].copy()
 y = df['Sales'].copy()
 
-print(f'✓ X shape: {X.shape}')
-print(f'✓ y shape: {y.shape}')
-
-# Check for object dtypes
-object_cols = X.select_dtypes(include=['object']).columns.tolist()
-if object_cols:
-    raise ValueError(f'Object dtype columns found: {object_cols}')
-print('✓ All features are numeric (no object dtype)')
-
 # Train-test split
 train_size = int(len(X) * 0.8)
 X_train = X.iloc[:train_size]
@@ -77,13 +70,11 @@ X_test = X.iloc[train_size:]
 y_train = y.iloc[:train_size]
 y_test = y.iloc[train_size:]
 
-print(f'\nTrain-test split:')
-print(f'   Training: {len(X_train)} rows')
-print(f'   Testing: {len(X_test)} rows')
+print(f'\nTrain-test split: Training {len(X_train)} rows | Testing {len(X_test)} rows')
 
-# Train XGBoost
-print(f'\nTraining XGBoost model...')
-model = XGBRegressor(
+# 1. Train XGBoost
+print(f'\n1. Training XGBoost Regressor...')
+xgb_model = XGBRegressor(
     n_estimators=300,
     learning_rate=0.05,
     max_depth=5,
@@ -91,47 +82,44 @@ model = XGBRegressor(
     colsample_bytree=0.8,
     random_state=42
 )
+xgb_model.fit(X_train, y_train)
+xgb_preds = xgb_model.predict(X_test)
+xgb_mae = mean_absolute_error(y_test, xgb_preds)
+print(f'   XGBoost MAE: ${xgb_mae:.2f}')
 
-model.fit(X_train, y_train)
-print('✓ Model trained successfully')
-
-# Evaluate
-preds = model.predict(X_test)
-mae = mean_absolute_error(y_test, preds)
-
-print(f'\nModel Performance:')
-print(f'   Mean Absolute Error: ${mae:.2f}')
-print(f'   Test samples: {len(y_test)}')
-
-# Save model
-print(f'\nSaving production model...')
+# Save XGBoost model
 joblib.dump({
-    'model_pipeline': model,
+    'model_pipeline': xgb_model,
     'expected_feature_columns': ENGINEERED_FEATURES,
     'model_type': 'XGBoost',
-    'mae': mae,
+    'mae': xgb_mae,
     'features': ENGINEERED_FEATURES
-}, model_output)
+}, xgb_output)
+print(f'   XGBoost saved as {xgb_output}')
 
-print(f'✅ Model saved as {model_output}')
+# 2. Train RandomForest
+print(f'\n2. Training RandomForest Regressor...')
+rf_model = RandomForestRegressor(
+    n_estimators=150,
+    max_depth=12,
+    random_state=42,
+    n_jobs=-1
+)
+rf_model.fit(X_train, y_train)
+rf_preds = rf_model.predict(X_test)
+rf_mae = mean_absolute_error(y_test, rf_preds)
+print(f'   RandomForest MAE: ${rf_mae:.2f}')
 
-# Verify
-loaded = joblib.load(model_output)
-print(f'\nModel Verification:')
-print(f'   Type: {loaded["model_type"]}')
-print(f'   Features: {len(loaded["expected_feature_columns"])} columns')
-print(f'   MAE: ${loaded["mae"]:.2f}')
-
-# Test prediction
-test_sample = X_test.iloc[:1]
-test_pred = model.predict(test_sample)
-print(f'   Test prediction: ${test_pred[0]:.2f}')
+# Save RandomForest model
+joblib.dump({
+    'model_pipeline': rf_model,
+    'expected_feature_columns': ENGINEERED_FEATURES,
+    'model_type': 'RandomForest',
+    'mae': rf_mae,
+    'features': ENGINEERED_FEATURES
+}, rf_output)
+print(f'   RandomForest saved as {rf_output}')
 
 print('\n' + '=' * 80)
-print('🎯 PRODUCTION MODEL READY FOR STREAMLIT APP')
+print('DUAL PRODUCTION MODELS RETRAINED & COMPATIBLE FOR STREAMLIT APP v2.0')
 print('=' * 80)
-print('\nModel.pkl updated with:')
-print(f'  • XGBoost trained on {len(X_train)} samples')
-print(f'  • {len(ENGINEERED_FEATURES)} engineered features')
-print(f'  • MAE: ${mae:.2f}')
-print(f'  • Ready for app.py')

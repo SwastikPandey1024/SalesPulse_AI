@@ -1,12 +1,35 @@
-# 📊 SalesPulse AI v2.0 – Intelligent Sales Analytics & Multi-Horizon Forecasting
+<div align="center">
 
-[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-v2.0-red)](https://streamlit.io/)
-[![XGBoost](https://img.shields.io/badge/XGBoost-Latest-brightgreen)](https://xgboost.readthedocs.io/)
-[![Plotly](https://img.shields.io/badge/Plotly-Interactive-blueviolet)](https://plotly.com/)
-[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+# 📊 SalesPulse AI v2.0
+### *Intelligent Enterprise Sales Analytics, Multi-Horizon Forecasting & Business Simulation Engine*
 
-A **production-ready ML analytics platform** that predicts Superstore sales using XGBoost & RandomForest, delivers 7/14/30-day confidence-bound forecasts, runs business scenario simulations ("What-If"), and provides interactive analytics via Streamlit.
+[![Release v2.0](https://img.shields.io/badge/Release-v2.0.0-4F46E5?style=for-the-badge&logo=github)](https://github.com/SwastikPandey1024/SalesPulse_AI)
+[![Streamlit Cloud Live](https://img.shields.io/badge/Live_App-SalesPulse_AI-FF4B4B?style=for-the-badge&logo=streamlit)](https://salespulseai.streamlit.app)
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=for-the-badge&logo=python)](https://www.python.org/)
+[![XGBoost](https://img.shields.io/badge/Model-XGBoost-1572B6?style=for-the-badge&logo=xgboost)](https://xgboost.readthedocs.io/)
+[![RandomForest](https://img.shields.io/badge/Model-RandomForest-22C55E?style=for-the-badge&logo=scikitlearn)](https://scikit-learn.org/)
+[![Plotly](https://img.shields.io/badge/Visuals-Plotly-3F4F75?style=for-the-badge&logo=plotly)](https://plotly.com/)
+[![License MIT](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+
+**[🚀 Launch Live Web App](https://salespulseai.streamlit.app)** • **[📖 Architecture Specs (PRD)](docs/PRD.md)** • **[🌐 Deployment Guide](DEPLOYMENT.md)**
+
+</div>
+
+<br/>
+
+> ⚡ **SalesPulse AI v2.0** turns complex retail time-series data into high-precision sales forecasts, 95% confidence intervals, and dynamic business scenarios using an ensemble of XGBoost and RandomForest models.
+
+---
+
+### 🌟 Key Capabilities (Version 2.0)
+
+| Capability | Description |
+| :--- | :--- |
+| 🧠 **Dual Model Ensemble** | Switch between **XGBoost Regressor**, **RandomForest Regressor**, or an **Ensemble Blend**. |
+| 📈 **Multi-Horizon Forecasting** | Generate **7-Day, 14-Day & 30-Day** iterative forecasts with 95% confidence prediction bands. |
+| 🎯 **"What-If" Scenario Simulator** | Interactively adjust promotional campaign lift (%), price adjustments (%), and seasonal multipliers. |
+| 📊 **Superstore EDA Explorer** | Interactive category share pie charts, regional sales heatmaps, and monthly trend breakdowns. |
+| 📁 **Smart Batch Engine** | Ingest multi-record CSV files with auto feature extraction and single-click CSV exporting. |
 
 ---
 

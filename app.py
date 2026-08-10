@@ -531,7 +531,7 @@ with tab_sim:
         with m_c2:
             st.metric("Simulated Sales", f"${simulated_sales:,.2f}", delta=f"{pct_delta:+.1f}%")
         with m_c3:
-            st.metric("Revenue Impact", f"${delta:+,2f}")
+            st.metric("Revenue Impact", f"${delta:+,.2f}")
             
         # Plot comparison
         sim_df = pd.DataFrame({
