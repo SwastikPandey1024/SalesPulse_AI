@@ -96,6 +96,17 @@ boot_status.info("🚀 **Booting SalesPulse AI v2.0 Engine...**")
 # FILE & DIRECTORY CONFIGURATION
 # ============================================================================
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+from salespulse.data import (
+    safe_ingest_file,
+    aggregate_to_daily_sales,
+    GrainType,
+    ValidationSeverity,
+    MISSING_DATE_POLICY,
+)
+
 MODEL_DIR = os.path.join(PROJECT_ROOT, 'model_data')
 XGB_MODEL_PATH = os.path.join(MODEL_DIR, 'model.pkl')
 RF_MODEL_PATH = os.path.join(MODEL_DIR, 'rf_model.pkl')
@@ -314,7 +325,7 @@ def generate_business_insights(predicted_val, lag_1, rm_7, rm_14):
 # MULTI-DAY FORECASTING ENGINE WITH CONFIDENCE INTERVALS
 # ============================================================================
 def forecast_horizon(initial_df, horizon_days=7, model_choice="XGBoost"):
-    """Generate multi-day forecast with 95% confidence intervals."""
+    """Generate multi-day forecast with empirical prediction uncertainty intervals."""
     dates = []
     preds = []
     lowers = []
@@ -485,7 +496,7 @@ with tab_pred:
 with tab_trend:
     try:
         st.subheader("📈 Multi-Horizon Iterative Forecasting")
-        st.caption("Generate multi-day predictions complete with upper and lower 95% confidence intervals.")
+        st.caption("Generate multi-day predictions complete with upper and lower empirical prediction intervals.")
         
         col_fc1, col_fc2 = st.columns([1, 3])
         with col_fc1:
@@ -520,7 +531,7 @@ with tab_trend:
                     line=dict(color='rgba(255,255,255,0)'),
                     hoverinfo="skip",
                     showlegend=True,
-                    name='95% Confidence Band'
+                    name='Prediction Interval Band'
                 ))
                 # Forecast Line
                 fig.add_trace(go.Scatter(
@@ -533,7 +544,7 @@ with tab_trend:
                 ))
                 
                 fig.update_layout(
-                    title=f"{h_val}-Day Iterative Sales Forecast with Confidence Interval",
+                    title=f"{h_val}-Day Iterative Sales Forecast with Empirical Prediction Band",
                     xaxis_title="Date",
                     yaxis_title="Sales ($)",
                     template="plotly_white",
@@ -662,13 +673,54 @@ with tab_bench:
         
         b_col1, b_col2 = st.columns([1, 1])
         with b_col1:
-            st.markdown("### 📊 Architecture Comparison Matrix")
-            bench_data = pd.DataFrame({
-                "Metric": ["Model Type", "Engineered Features", "Validation MAE", "Prediction Latency", "Interpretability"],
-                "XGBoost Regressor": ["Gradient Boosted Trees", "13 Columns", "~$55 - $65", "< 25 ms", "Feature Importances"],
-                "RandomForest Regressor": ["Random Forest Ensemble", "13 Columns", "~$60 - $70", "< 35 ms", "Tree Gini Impurity"]
-            })
-            st.table(bench_data.set_index("Metric"))
+            st.markdown("### 📊 Architecture & Verified Backtest Matrix")
+            # Load corrected dynamic backtest results (falling back to legacy backtest if needed)
+            backtest_file = os.path.join(MODEL_DIR, "daily_candidate_models", "backtest_results_corrected.json")
+            if not os.path.exists(backtest_file):
+                backtest_file = os.path.join(MODEL_DIR, "daily_candidate_models", "backtest_results.json")
+
+            if os.path.exists(backtest_file):
+                import json
+                with open(backtest_file, "r") as bf:
+                    bt_full = json.load(bf)
+                bt_data = bt_full.get("summary_metrics", {})
+                origins_count = bt_full.get("origins_count", 13)
+                
+                sel_horizon = st.selectbox("Forecast Horizon for Verified Metrics", options=["7_day", "14_day", "30_day"], format_func=lambda x: f"{x.split('_')[0]}-Day Horizon (Walk-Forward CV)")
+                
+                rows = []
+                overlap_ratio = 1.0
+                unique_dates = 0
+                for m_name, m_horizons in bt_data.items():
+                    h_info = m_horizons.get(sel_horizon, {})
+                    micro = h_info.get("micro", h_info)
+                    macro = h_info.get("macro", {})
+                    overlap_ratio = h_info.get("overlap_ratio", 1.0)
+                    unique_dates = h_info.get("unique_target_dates", h_info.get("count", 0))
+
+                    wape_micro_str = f"{micro.get('wape', 0)*100:.1f}%"
+                    wape_macro_str = f"{macro.get('wape_mean', 0)*100:.1f}%" if "wape_mean" in macro else "N/A"
+                    cov_val = micro.get("coverage", macro.get("coverage_mean"))
+                    cov_str = f"{cov_val*100:.1f}%" if cov_val is not None else "N/A"
+
+                    rows.append({
+                        "Architecture": m_name,
+                        "MAE ($)": f"${micro.get('mae', 0):,.2f}",
+                        "WAPE (Micro)": wape_micro_str,
+                        "WAPE (Macro)": wape_macro_str,
+                        "Bias": f"{micro.get('bias_pct', 0)*100:+.1f}%",
+                        "Coverage": cov_str,
+                    })
+                st.dataframe(pd.DataFrame(rows).set_index("Architecture"), use_container_width=True)
+                st.caption(f"ℹ️ *Evaluated on {origins_count} chronological origins ({unique_dates} unique calendar dates, overlap ratio: {overlap_ratio:.2f}). Compares dynamic walk-forward refit vs fixed models.*")
+            else:
+                bench_data = pd.DataFrame({
+                    "Architecture": ["XGBoost Regressor", "RandomForest Regressor", "Seasonal-Naive Baseline"],
+                    "Features": ["13 Columns", "13 Columns", "7-Day Weekly Lag"],
+                    "Training Grain": ["Daily Aggregated", "Daily Aggregated", "Daily Aggregated"],
+                    "Backtest Protocol": ["Rolling-Origin", "Rolling-Origin", "Chronological Baseline"],
+                })
+                st.table(bench_data.set_index("Architecture"))
             
         with b_col2:
             st.markdown("### 🌳 Feature Importance Rankings")
@@ -697,51 +749,191 @@ with tab_bench:
         st.error(f"⚠️ Benchmarks Tab Warning: {e5}")
 
 # ----------------------------------------------------------------------------
-# TAB 6: SMART BATCH PROCESSING
+# TAB 6: SMART DATA INGESTION & BATCH FORECASTING
 # ----------------------------------------------------------------------------
 with tab_batch:
     try:
-        st.subheader("📁 Smart Batch Processing Engine v2.0")
-        st.caption("Upload a CSV file containing multiple records for automated parallel batch forecasting.")
+        st.subheader("📁 Smart Data Ingestion & Batch Forecasting Engine v2.0")
+        st.caption("Upload raw transaction logs, daily sales records, or 13-feature batches in CSV or Excel format. Safe ingestion validates schema contracts, isolates corrupt rows into quarantine, and reports data quality diagnostics before inference.")
         
-        file_up = st.file_uploader("Upload CSV Data File", type=["csv"], key="batch_v2")
+        col_up1, col_up2 = st.columns([3, 1])
+        with col_up1:
+            file_up = st.file_uploader(
+                "Upload Sales Data File (CSV / Excel)",
+                type=["csv", "xlsx", "xls"],
+                key="batch_v2",
+                help="Accepts CSV or Excel spreadsheets containing transaction items ('Order Date', 'Sales'), daily series, or 13-feature prediction batches."
+            )
+        with col_up2:
+            st.markdown("##### ⚙️ Ingestion Settings")
+            max_staleness = st.number_input(
+                "Freshness Threshold (Days)",
+                min_value=1,
+                max_value=365,
+                value=30,
+                help="Configurable threshold for flagging stale observations. (Threshold check, not live monitoring)."
+            )
+
         if file_up:
-            try:
-                batch_raw = pd.read_csv(file_up)
-                st.write("##### File Preview (First 5 Records)")
-                st.dataframe(batch_raw.head(), use_container_width=True)
+            with st.spinner("🔍 Running Data Contracts & Schema Validation..."):
+                ingest_res = safe_ingest_file(
+                    file_up,
+                    file_name=file_up.name,
+                    max_staleness_days=int(max_staleness),
+                )
+                report = ingest_res.report
+                diag = report.diagnostics
+
+            # 1. Validation Status Banner
+            if report.status == "PASSED":
+                st.success("✅ **Dataset Validation Verdict: PASSED** — Input strictly satisfies all data contracts and data-quality rules.")
+            elif report.status == "WARNING":
+                warn_count = len([i for i in report.issues if i.severity == ValidationSeverity.WARNING])
+                st.warning(f"⚠️ **Dataset Validation Verdict: PASSED WITH WARNINGS** — {warn_count} data quality review flag(s) identified. Valid records are available for processing.")
+            else:
+                err_count = len([i for i in report.issues if i.severity == ValidationSeverity.ERROR])
+                st.error(f"❌ **Dataset Validation Verdict: FAILED** — {err_count} critical contract violation(s) detected. Dataset rejected from entering forecasting pipeline.")
+
+            # 2. Key Metrics Row
+            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+            with m_col1:
+                st.metric("Detected Grain", report.grain.value.replace("_", " ").title())
+            with m_col2:
+                st.metric("Total Records Read", f"{report.total_rows_read:,}")
+            with m_col3:
+                st.metric("Valid Clean Records", f"{report.valid_rows_count:,}")
+            with m_col4:
+                st.metric("Quarantined Records", f"{report.quarantined_rows_count:,}", delta=f"-{report.quarantined_rows_count}" if report.quarantined_rows_count > 0 else "0", delta_color="inverse")
+
+            # 3. Validation Issues & Remediation Table
+            if report.issues:
+                with st.expander(f"📋 Validation Issue Details ({len(report.issues)} findings)", expanded=(report.status != "PASSED")):
+                    issue_rows = []
+                    for issue in report.issues:
+                        issue_rows.append({
+                            "Severity": issue.severity.value,
+                            "Code": issue.code,
+                            "Message": issue.message,
+                            "Affected Records": issue.affected_count,
+                            "Sample Rows": str(issue.sample_rows[:5]) if issue.sample_rows else "-",
+                            "Remediation Advice": issue.remediation,
+                        })
+                    st.dataframe(pd.DataFrame(issue_rows), use_container_width=True)
+
+            # 4. Data Quality Diagnostics Expander
+            if diag and diag.get("valid", False):
+                with st.expander("📊 Data Quality Diagnostics & Distribution Summary", expanded=False):
+                    d_c1, d_c2 = st.columns(2)
+                    with d_c1:
+                        st.markdown("##### 📅 Calendar Coverage & Freshness")
+                        cov = diag.get("date_coverage", {})
+                        fresh = diag.get("freshness", {})
+                        if cov:
+                            st.write(f"• **Date Range:** `{cov.get('min_date')}` to `{cov.get('max_date')}` ({cov.get('calendar_span_days')} calendar days)")
+                            st.write(f"• **Active Trading Days:** `{cov.get('unique_active_dates')}` unique dates")
+                            st.write(f"• **Missing Calendar Days:** `{cov.get('missing_calendar_days')}` days")
+                            st.caption("ℹ️ *Missing Date Policy: Absent calendar days are zero-filled ($0.00) during aggregation.*")
+                        if fresh:
+                            f_badge = "🟢 FRESH" if not fresh.get("is_stale") else "🟠 STALE"
+                            st.write(f"• **Freshness Assessment:** {f_badge} (Latest: `{fresh.get('latest_observation_date')}`, staleness: `{fresh.get('staleness_days')}` days, threshold: `{fresh.get('threshold_days')}` days)")
+                            st.caption(f"ℹ️ *{fresh.get('assessment_note')}*")
+
+                    with d_c2:
+                        st.markdown("##### 💵 Sales Value Statistics & Review Flags")
+                        dist = diag.get("sales_distribution", {})
+                        num = diag.get("numeric_validity", {})
+                        if dist:
+                            st.write(f"• **Mean / Median Sales:** `${dist.get('mean', 0):,.2f}` / `${dist.get('median', 0):,.2f}`")
+                            st.write(f"• **Observed Range:** `${dist.get('min', 0):,.2f}` to `${dist.get('max', 0):,.2f}` (Std Dev: `${dist.get('std', 0):,.2f}`)")
+                        if num:
+                            st.write(f"• **Zero-Sales Records:** `{num.get('zero_sales_count', 0):,}` | **Negative Sales (Returns):** `{num.get('negative_sales_count', 0):,}`")
+
+                        anomalies = diag.get("anomalies", [])
+                        if anomalies:
+                            st.markdown("###### ⚠️ Statistical Review Flags (Explainable)")
+                            for a in anomalies:
+                                st.info(f"**[{a.get('flag')}]**: {a.get('description')}")
+                        else:
+                            st.write("• **Statistical Distribution:** No extreme distribution anomalies detected.")
+
+            # 5. Download Validation Report
+            st.download_button(
+                "📥 Download Validation Report (JSON)",
+                data=report.to_json(),
+                file_name=f"{os.path.splitext(file_up.name)[0]}_validation_report.json",
+                mime="application/json",
+                help="Export comprehensive machine-readable validation results without exposing confidential row data."
+            )
+
+            # 6. Downstream Execution for Valid Data
+            if ingest_res.is_usable:
+                st.divider()
+                st.markdown("### 🚀 Downstream Forecasting Pipeline")
                 
-                if st.button("🚀 Process Batch File", use_container_width=True):
-                    batch_results = []
-                    for idx, row in batch_raw.iterrows():
-                        try:
-                            row_date = row.get("date", datetime.now())
-                            date_feats = extract_date_features(row_date)
-                            input_df = build_feature_dataframe(
-                                date_feats,
-                                row.get("lag_1", 100),
-                                row.get("lag_7", 100),
-                                row.get("lag_14", 100),
-                                row.get("lag_30", 100),
-                                row.get("rolling_mean_7", 100),
-                                row.get("rolling_mean_14", 100),
-                                row.get("rolling_std_7", 10),
-                                row.get("trend", 1)
-                            )
-                            pred = predict_sales(input_df, selected_model_choice)
-                            batch_results.append({"Row": idx + 1, "Predicted_Sales": round(pred, 2), "Status": "✅ Success"})
-                        except Exception as err:
-                            batch_results.append({"Row": idx + 1, "Predicted_Sales": None, "Status": f"❌ Error: {str(err)[:30]}"})
-                            
-                    res_df = pd.DataFrame(batch_results)
-                    st.success(f"✅ Processed {len(res_df)} records successfully!")
-                    st.dataframe(res_df, use_container_width=True)
-                    
-                    csv_batch = res_df.to_csv(index=False)
-                    st.download_button("📥 Download Batch Predictions CSV", data=csv_batch, file_name="batch_predictions_v2.csv", mime="text/csv")
-                    
-            except Exception as e:
-                st.error(f"❌ Failed to parse uploaded file: {e}")
+                # Case A: Feature Batch
+                if report.grain == GrainType.FEATURE_BATCH:
+                    st.write("##### File Preview (Clean Feature Records)")
+                    st.dataframe(ingest_res.valid_df.head(), use_container_width=True)
+
+                    if st.button("🚀 Process Batch Feature Predictions", use_container_width=True):
+                        batch_results = []
+                        for idx, row in ingest_res.valid_df.iterrows():
+                            try:
+                                # Directly preserve the validated 13-feature contract without date overwriting or fallbacks
+                                input_df = row[ENGINEERED_FEATURES].to_frame().T.astype(np.float64)
+                                pred = predict_sales(input_df, selected_model_choice)
+                                batch_results.append({"Row": idx + 1, "Predicted_Sales": round(pred, 2), "Status": "✅ Success"})
+                            except Exception as err:
+                                batch_results.append({"Row": idx + 1, "Predicted_Sales": None, "Status": f"❌ Error: {str(err)[:30]}"})
+
+                        res_df = pd.DataFrame(batch_results)
+                        st.success(f"✅ Processed {len(res_df)} records successfully!")
+                        st.dataframe(res_df, use_container_width=True)
+
+                        csv_batch = res_df.to_csv(index=False)
+                        st.download_button("📥 Download Batch Predictions CSV", data=csv_batch, file_name="batch_predictions_v2.csv", mime="text/csv")
+
+                # Case B: Transaction or Daily Aggregated Grain
+                elif report.grain in [GrainType.TRANSACTION, GrainType.DAILY_AGGREGATED]:
+                    st.write("##### Valid Records Preview (First 5 Rows)")
+                    st.dataframe(ingest_res.valid_df.head(), use_container_width=True)
+
+                    # Auto-aggregation to daily series using preserved logic
+                    _, col_map = detect_dataset_grain(ingest_res.valid_df)
+                    date_c = col_map.get("date", "Order Date")
+                    sales_c = col_map.get("sales", "Sales")
+
+                    try:
+                        daily_series_df = aggregate_to_daily_sales(
+                            ingest_res.valid_df,
+                            date_col=date_c,
+                            sales_col=sales_c,
+                            fill_missing_dates=True,
+                        )
+                        st.markdown(f"#### 📈 Continuous Daily Sales Aggregation ({len(daily_series_df)} Days)")
+                        st.caption(f"Aggregated from `{date_c}` & `{sales_c}` with zero-fill calendar reindexing ({MISSING_DATE_POLICY[:17]}).")
+
+                        fig_daily = px.line(
+                            daily_series_df, x="date", y="sales",
+                            title=f"Continuous Daily Sales ({daily_series_df['date'].min().date()} to {daily_series_df['date'].max().date()})",
+                            template="plotly_white",
+                        )
+                        fig_daily.update_layout(height=340)
+                        st.plotly_chart(fig_daily, use_container_width=True)
+
+                        csv_daily = daily_series_df.to_csv(index=False)
+                        st.download_button(
+                            "📥 Download Clean Daily Sales Series (CSV)",
+                            data=csv_daily,
+                            file_name=f"{os.path.splitext(file_up.name)[0]}_daily_series.csv",
+                            mime="text/csv"
+                        )
+                    except Exception as agg_err:
+                        st.error(f"Failed to aggregate daily series: {agg_err}")
+
+            else:
+                st.info("🚫 **Forecasting Blocked**: Please resolve the critical validation issues above to enable downstream forecasting.")
+
     except Exception as e6:
         st.error(f"⚠️ Batch Tab Warning: {e6}")
 

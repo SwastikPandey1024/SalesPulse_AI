@@ -1,0 +1,519 @@
+{
+  "folds_evaluated": 13,
+  "origins_count": 13,
+  "step_days": 14,
+  "eval_window_days": 180,
+  "fold_details": [
+    {
+      "fold": 1,
+      "origin_date": "2017-06-04",
+      "origin_idx": 1248,
+      "history_length": 1249,
+      "forecast_start": "2017-06-05",
+      "forecast_end": "2017-07-04"
+    },
+    {
+      "fold": 2,
+      "origin_date": "2017-06-18",
+      "origin_idx": 1262,
+      "history_length": 1263,
+      "forecast_start": "2017-06-19",
+      "forecast_end": "2017-07-18"
+    },
+    {
+      "fold": 3,
+      "origin_date": "2017-07-02",
+      "origin_idx": 1276,
+      "history_length": 1277,
+      "forecast_start": "2017-07-03",
+      "forecast_end": "2017-08-01"
+    },
+    {
+      "fold": 4,
+      "origin_date": "2017-07-16",
+      "origin_idx": 1290,
+      "history_length": 1291,
+      "forecast_start": "2017-07-17",
+      "forecast_end": "2017-08-15"
+    },
+    {
+      "fold": 5,
+      "origin_date": "2017-07-30",
+      "origin_idx": 1304,
+      "history_length": 1305,
+      "forecast_start": "2017-07-31",
+      "forecast_end": "2017-08-29"
+    },
+    {
+      "fold": 6,
+      "origin_date": "2017-08-13",
+      "origin_idx": 1318,
+      "history_length": 1319,
+      "forecast_start": "2017-08-14",
+      "forecast_end": "2017-09-12"
+    },
+    {
+      "fold": 7,
+      "origin_date": "2017-08-27",
+      "origin_idx": 1332,
+      "history_length": 1333,
+      "forecast_start": "2017-08-28",
+      "forecast_end": "2017-09-26"
+    },
+    {
+      "fold": 8,
+      "origin_date": "2017-09-10",
+      "origin_idx": 1346,
+      "history_length": 1347,
+      "forecast_start": "2017-09-11",
+      "forecast_end": "2017-10-10"
+    },
+    {
+      "fold": 9,
+      "origin_date": "2017-09-24",
+      "origin_idx": 1360,
+      "history_length": 1361,
+      "forecast_start": "2017-09-25",
+      "forecast_end": "2017-10-24"
+    },
+    {
+      "fold": 10,
+      "origin_date": "2017-10-08",
+      "origin_idx": 1374,
+      "history_length": 1375,
+      "forecast_start": "2017-10-09",
+      "forecast_end": "2017-11-07"
+    },
+    {
+      "fold": 11,
+      "origin_date": "2017-10-22",
+      "origin_idx": 1388,
+      "history_length": 1389,
+      "forecast_start": "2017-10-23",
+      "forecast_end": "2017-11-21"
+    },
+    {
+      "fold": 12,
+      "origin_date": "2017-11-05",
+      "origin_idx": 1402,
+      "history_length": 1403,
+      "forecast_start": "2017-11-06",
+      "forecast_end": "2017-12-05"
+    },
+    {
+      "fold": 13,
+      "origin_date": "2017-11-19",
+      "origin_idx": 1416,
+      "history_length": 1417,
+      "forecast_start": "2017-11-20",
+      "forecast_end": "2017-12-19"
+    }
+  ],
+  "horizons": [
+    7,
+    14,
+    30
+  ],
+  "summary_metrics": {
+    "Seasonal-Naive Baseline": {
+      "7_day": {
+        "total_evaluations": 91,
+        "unique_target_dates": 91,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 7655.059154345582,
+        "micro": {
+          "count": 91,
+          "mae": 2282.144607692308,
+          "rmse": 3461.6777543008766,
+          "wape": 1.1560154807930243,
+          "bias_pct": 0.4003581120851934,
+          "mean_error": 790.3658054945055,
+          "coverage": 0.8901098901098901
+        },
+        "macro": {
+          "mae_mean": 2282.144607692308,
+          "mae_std": 1038.0727713992478,
+          "rmse_mean": 3131.3946576836306,
+          "rmse_std": 1535.9184234488644,
+          "wape_mean": 1.3131727011766425,
+          "wape_std": 0.7721175861090658,
+          "bias_mean": 0.6332528699959712,
+          "bias_std": 1.021952471565257,
+          "coverage_mean": 0.8901098901098903
+        }
+      },
+      "14_day": {
+        "total_evaluations": 182,
+        "unique_target_dates": 182,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 8868.33287129362,
+        "micro": {
+          "count": 182,
+          "mae": 2591.8905598901097,
+          "rmse": 3767.6622257693293,
+          "wape": 1.0396830714166656,
+          "bias_pct": 0.10892694000740885,
+          "mean_error": 271.5507401098901,
+          "coverage": 0.9120879120879121
+        },
+        "macro": {
+          "mae_mean": 2591.89055989011,
+          "mae_std": 1131.0106366945918,
+          "rmse_mean": 3436.813611582843,
+          "rmse_std": 1606.9298109403114,
+          "wape_mean": 1.0390790468165392,
+          "wape_std": 0.3240262517789386,
+          "bias_mean": 0.13063950542951014,
+          "bias_std": 0.3678073086327837,
+          "coverage_mean": 0.9120879120879123
+        }
+      },
+      "30_day": {
+        "total_evaluations": 390,
+        "unique_target_dates": 198,
+        "overlap_ratio": 1.9696969696969697,
+        "mean_interval_width": 10954.633508371036,
+        "micro": {
+          "count": 390,
+          "mae": 2397.003381282051,
+          "rmse": 3504.2557224877824,
+          "wape": 0.9590756124308529,
+          "bias_pct": 0.09430811168570165,
+          "mean_error": 235.70285769230767,
+          "coverage": 0.9512820512820512
+        },
+        "macro": {
+          "mae_mean": 2397.003381282051,
+          "mae_std": 882.7409050046457,
+          "rmse_mean": 3299.5396486215573,
+          "rmse_std": 1228.3797453324132,
+          "wape_mean": 0.9552169388656551,
+          "wape_std": 0.18823601128588285,
+          "bias_mean": 0.08285344145987326,
+          "bias_std": 0.3127026017467582,
+          "coverage_mean": 0.9512820512820515
+        }
+      }
+    },
+    "XGBoost (Dynamic Walk-Forward)": {
+      "7_day": {
+        "total_evaluations": 91,
+        "unique_target_dates": 91,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 7739.200009363443,
+        "micro": {
+          "count": 91,
+          "mae": 1619.4941765596159,
+          "rmse": 2183.3928578320547,
+          "wape": 0.8203513190385361,
+          "bias_pct": 0.22305789293695455,
+          "mean_error": 440.34909222848074,
+          "coverage": 0.967032967032967
+        },
+        "macro": {
+          "mae_mean": 1619.4941765596157,
+          "mae_std": 732.751674161211,
+          "rmse_mean": 1996.350124512131,
+          "rmse_std": 920.2933036040524,
+          "wape_mean": 0.8945783834569555,
+          "wape_std": 0.35853454593109535,
+          "bias_mean": 0.3769694304933191,
+          "bias_std": 0.5647336334443795,
+          "coverage_mean": 0.967032967032967
+        }
+      },
+      "14_day": {
+        "total_evaluations": 182,
+        "unique_target_dates": 182,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 8623.063456393313,
+        "micro": {
+          "count": 182,
+          "mae": 1820.437297783183,
+          "rmse": 2480.1615331679523,
+          "wape": 0.7302306163578606,
+          "bias_pct": -0.0063158859247902386,
+          "mean_error": -15.745264644446754,
+          "coverage": 0.9615384615384616
+        },
+        "macro": {
+          "mae_mean": 1820.4372977831833,
+          "mae_std": 728.4251929800238,
+          "rmse_mean": 2307.802731168463,
+          "rmse_std": 945.5254800033175,
+          "wape_mean": 0.7426690939645666,
+          "wape_std": 0.17774572223982024,
+          "bias_mean": 0.03716764672767204,
+          "bias_std": 0.2605652897656913,
+          "coverage_mean": 0.9615384615384616
+        }
+      },
+      "30_day": {
+        "total_evaluations": 390,
+        "unique_target_dates": 198,
+        "overlap_ratio": 1.9696969696969697,
+        "mean_interval_width": 10274.879292350082,
+        "micro": {
+          "count": 390,
+          "mae": 1847.0918965257065,
+          "rmse": 2469.8160549959257,
+          "wape": 0.7390480988512249,
+          "bias_pct": 0.041634679818891684,
+          "mean_error": 104.05693462638659,
+          "coverage": 0.9717948717948718
+        },
+        "macro": {
+          "mae_mean": 1847.0918965257067,
+          "mae_std": 527.957376845501,
+          "rmse_mean": 2380.5708249868276,
+          "rmse_std": 684.7968436930307,
+          "wape_mean": 0.7477557359358685,
+          "wape_std": 0.11779200120770641,
+          "bias_mean": 0.05208100010944166,
+          "bias_std": 0.16618304072909335,
+          "coverage_mean": 0.9717948717948719
+        }
+      }
+    },
+    "RandomForest (Dynamic Walk-Forward)": {
+      "7_day": {
+        "total_evaluations": 91,
+        "unique_target_dates": 91,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 8531.542824150087,
+        "micro": {
+          "count": 91,
+          "mae": 2317.0819531641428,
+          "rmse": 3158.5868950406502,
+          "wape": 1.1737129185833908,
+          "bias_pct": 0.643651462795607,
+          "mean_error": 1270.6626679813962,
+          "coverage": 0.9120879120879121
+        },
+        "macro": {
+          "mae_mean": 2317.0819531641428,
+          "mae_std": 1759.6694570719528,
+          "rmse_mean": 2664.723151733474,
+          "rmse_std": 1765.1010848247956,
+          "wape_mean": 1.5114727015042584,
+          "wape_std": 2.047350735137524,
+          "bias_mean": 1.0711824385536226,
+          "bias_std": 2.2248261748078266,
+          "coverage_mean": 0.9120879120879122
+        }
+      },
+      "14_day": {
+        "total_evaluations": 182,
+        "unique_target_dates": 182,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 9619.403412775242,
+        "micro": {
+          "count": 182,
+          "mae": 2333.149169026099,
+          "rmse": 3134.023341561797,
+          "wape": 0.9358943358430772,
+          "bias_pct": 0.38550758934523993,
+          "mean_error": 961.0558342826777,
+          "coverage": 0.9395604395604396
+        },
+        "macro": {
+          "mae_mean": 2333.1491690260996,
+          "mae_std": 1418.8158110498302,
+          "rmse_mean": 2762.712205664814,
+          "rmse_std": 1540.1246287130684,
+          "wape_mean": 0.9360343309235439,
+          "wape_std": 0.46114961640559426,
+          "bias_mean": 0.4041329374935714,
+          "bias_std": 0.6590887814238487,
+          "coverage_mean": 0.9395604395604396
+        }
+      },
+      "30_day": {
+        "total_evaluations": 390,
+        "unique_target_dates": 198,
+        "overlap_ratio": 1.9696969696969697,
+        "mean_interval_width": 11487.611250775994,
+        "micro": {
+          "count": 390,
+          "mae": 2472.7483541621446,
+          "rmse": 3207.001964942029,
+          "wape": 0.9893822681580883,
+          "bias_pct": 0.5016461050472066,
+          "mean_error": 1253.7566323445837,
+          "coverage": 0.9615384615384616
+        },
+        "macro": {
+          "mae_mean": 2472.7483541621446,
+          "mae_std": 1344.3121003797874,
+          "rmse_mean": 2921.606413241144,
+          "rmse_std": 1376.5297066734327,
+          "wape_mean": 0.9660912599287299,
+          "wape_std": 0.3154226523773841,
+          "bias_mean": 0.4667891791518178,
+          "bias_std": 0.49310446619245357,
+          "coverage_mean": 0.9615384615384616
+        }
+      }
+    },
+    "Ensemble (Dynamic Walk-Forward)": {
+      "7_day": {
+        "total_evaluations": 91,
+        "unique_target_dates": 91,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 8175.3625986740635,
+        "micro": {
+          "count": 91,
+          "mae": 1941.7343647991956,
+          "rmse": 2519.3916928572535,
+          "wape": 0.9835813987114002,
+          "bias_pct": 0.4285071969293903,
+          "mean_error": 845.9362396763978,
+          "coverage": 0.967032967032967
+        },
+        "macro": {
+          "mae_mean": 1941.7343647991959,
+          "mae_std": 975.1781106569551,
+          "rmse_mean": 2302.245669316615,
+          "rmse_std": 1065.0114217683063,
+          "wape_mean": 1.1803192575661987,
+          "wape_std": 1.0517604537334209,
+          "bias_mean": 0.718055499090583,
+          "bias_std": 1.2654195045352739,
+          "coverage_mean": 0.967032967032967
+        }
+      },
+      "14_day": {
+        "total_evaluations": 182,
+        "unique_target_dates": 182,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 9138.692919549552,
+        "micro": {
+          "count": 182,
+          "mae": 2033.3088400136776,
+          "rmse": 2650.0048872469238,
+          "wape": 0.8156196147470465,
+          "bias_pct": 0.18654400058301074,
+          "mean_error": 465.047135427938,
+          "coverage": 0.9615384615384616
+        },
+        "macro": {
+          "mae_mean": 2033.3088400136771,
+          "mae_std": 852.1593954668145,
+          "rmse_mean": 2460.014384829492,
+          "rmse_std": 1025.5533740067385,
+          "wape_mean": 0.8253317624825718,
+          "wape_std": 0.2225340093614037,
+          "bias_mean": 0.2236541702757388,
+          "bias_std": 0.39478229600722525,
+          "coverage_mean": 0.9615384615384616
+        }
+      },
+      "30_day": {
+        "total_evaluations": 390,
+        "unique_target_dates": 198,
+        "overlap_ratio": 1.9696969696969697,
+        "mean_interval_width": 10881.72216873193,
+        "micro": {
+          "count": 390,
+          "mae": 2114.623317929272,
+          "rmse": 2691.220677044334,
+          "wape": 0.8460912777765239,
+          "bias_pct": 0.26715057563362304,
+          "mean_error": 667.6854512880332,
+          "coverage": 0.9717948717948718
+        },
+        "macro": {
+          "mae_mean": 2114.623317929272,
+          "mae_std": 755.1308095213722,
+          "rmse_mean": 2569.2003693479314,
+          "rmse_std": 833.8873090839095,
+          "wape_mean": 0.842611110024107,
+          "wape_std": 0.13646034737643248,
+          "bias_mean": 0.26043664500152336,
+          "bias_std": 0.2944343886328727,
+          "coverage_mean": 0.9717948717948719
+        }
+      }
+    },
+    "XGBoost (Fixed Model Legacy)": {
+      "7_day": {
+        "total_evaluations": 91,
+        "unique_target_dates": 91,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 4783.802615208705,
+        "micro": {
+          "count": 91,
+          "mae": 1432.2876842842522,
+          "rmse": 2152.4075707251072,
+          "wape": 0.7255222698863371,
+          "bias_pct": -0.02784934256894686,
+          "mean_error": -54.97869883878932,
+          "coverage": 0.9120879120879121
+        },
+        "macro": {
+          "mae_mean": 1432.287684284252,
+          "mae_std": 743.1197064766035,
+          "rmse_mean": 1887.95223892542,
+          "rmse_std": 1075.8884322063889,
+          "wape_mean": 0.7546139239705497,
+          "wape_std": 0.24742622821127228,
+          "bias_mean": 0.11118137506454354,
+          "bias_std": 0.4768191133823154,
+          "coverage_mean": 0.912087912087912
+        }
+      },
+      "14_day": {
+        "total_evaluations": 182,
+        "unique_target_dates": 182,
+        "overlap_ratio": 1.0,
+        "mean_interval_width": 5356.3482573095125,
+        "micro": {
+          "count": 182,
+          "mae": 1711.222659985586,
+          "rmse": 2475.9927077733782,
+          "wape": 0.6864214325033237,
+          "bias_pct": -0.19618086872666932,
+          "mean_error": -489.07148309228916,
+          "coverage": 0.8901098901098901
+        },
+        "macro": {
+          "mae_mean": 1711.222659985586,
+          "mae_std": 671.9114151505247,
+          "rmse_mean": 2300.681642099909,
+          "rmse_std": 952.4639240092135,
+          "wape_mean": 0.6923373911495992,
+          "wape_std": 0.1440675640113441,
+          "bias_mean": -0.17118133005286934,
+          "bias_std": 0.18926403483446413,
+          "coverage_mean": 0.8901098901098903
+        }
+      },
+      "30_day": {
+        "total_evaluations": 390,
+        "unique_target_dates": 198,
+        "overlap_ratio": 1.9696969696969697,
+        "mean_interval_width": 6399.249250327393,
+        "micro": {
+          "count": 390,
+          "mae": 1714.068396195898,
+          "rmse": 2439.4623333272098,
+          "wape": 0.685823478459463,
+          "bias_pct": -0.13538920247272915,
+          "mean_error": -338.37621550366526,
+          "coverage": 0.9179487179487179
+        },
+        "macro": {
+          "mae_mean": 1714.0683961958975,
+          "mae_std": 495.00666913796067,
+          "rmse_mean": 2351.6118011612184,
+          "rmse_std": 675.2579359461971,
+          "wape_mean": 0.6921178234563676,
+          "wape_std": 0.10811125294027818,
+          "bias_mean": -0.13582707279199865,
+          "bias_std": 0.11617229585715245,
+          "coverage_mean": 0.9179487179487181
+        }
+      }
+    }
+  }
+}

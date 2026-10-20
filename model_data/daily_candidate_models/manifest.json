@@ -1,0 +1,66 @@
+{
+  "creation_timestamp": "2026-10-20T06:49:50.819767+00:00",
+  "grain": "daily_aggregated_sales",
+  "dataset_path": "model_data/Sample - Superstore.csv",
+  "dataset_sha256": "58fb59c63089e564d835e4aabe19d371757de1137a5bf1888243ae386c4b7a97",
+  "total_daily_samples": 1428,
+  "train_samples": 1142,
+  "test_samples": 286,
+  "features": [
+    "day",
+    "month",
+    "weekday",
+    "is_weekend",
+    "weekofyear",
+    "lag_1",
+    "lag_7",
+    "lag_14",
+    "lag_30",
+    "rolling_mean_7",
+    "rolling_mean_14",
+    "rolling_std_7",
+    "trend"
+  ],
+  "models": {
+    "XGBoost": {
+      "file": "candidate_xgb_daily.pkl",
+      "sha256": "3066c1f7dfde0a829f7dca9dad1404f6512ed02e1e0d2b701d45b844ddfa1e2a",
+      "residual_std": 1277.726035334518,
+      "test_metrics": {
+        "count": 286,
+        "mae": 1589.1933350597888,
+        "rmse": 2401.121045136377,
+        "wape": 0.7021043530550184,
+        "bias_pct": -0.1340359471776305,
+        "mean_error": -303.3865735004558
+      }
+    },
+    "RandomForest": {
+      "file": "candidate_rf_daily.pkl",
+      "sha256": "b852f1a260ea7617e966dcbb34a5353f644779fd9d7a90b9efd25c9e2fb861b9",
+      "residual_std": 1076.9844070017632,
+      "test_metrics": {
+        "count": 286,
+        "mae": 1720.2824179595082,
+        "rmse": 2444.168838095427,
+        "wape": 0.760019405749611,
+        "bias_pct": 0.03820914703582228,
+        "mean_error": 86.48532307688167
+      }
+    },
+    "Ensemble": {
+      "test_metrics": {
+        "count": 286,
+        "mae": 1641.9611393748974,
+        "rmse": 2401.3178863979674,
+        "wape": 0.7254171270853721,
+        "bias_pct": -0.047913400070904104,
+        "mean_error": -108.45062521178706
+      },
+      "weights": {
+        "XGBoost": 0.5,
+        "RandomForest": 0.5
+      }
+    }
+  }
+}

@@ -5,3 +5,5 @@ scikit-learn
 xgboost
 plotly
 joblib
+pytest
+openpyxl
