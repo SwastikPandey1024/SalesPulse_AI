@@ -663,3 +663,123 @@ def test_anomaly_disappearance_and_resolution_policy(memory_db):
     assert "RESOLVED - Corrected sales figure" in all_recs[0].explanation
 
 
+# ----------------------------------------------------------------------------
+# 13. Decision Support & Recommendation Engine Tests
+# ----------------------------------------------------------------------------
+
+from salespulse.analytics.recommendations import (
+    DecisionSupportEngine,
+    BusinessRecommendation,
+    RecommendationCategory,
+    UrgencyLevel,
+    EvidenceConfidence,
+)
+
+
+def test_decision_support_empty_dataset():
+    """Verify that empty or None dataset returns empty recommendations without error."""
+    engine = DecisionSupportEngine(currency_symbol="£")
+    recs = engine.analyze_dataset(daily_df=None)
+    assert recs == []
+
+    empty_df = pd.DataFrame(columns=["date", "sales"])
+    recs_empty = engine.analyze_dataset(daily_df=empty_df)
+    assert recs_empty == []
+
+
+def test_decision_support_return_margin_erosion():
+    """Verify that elevated returns trigger a quantified REVENUE_RISK recommendation."""
+    engine = DecisionSupportEngine(currency_symbol="£")
+    dates = pd.date_range("2021-01-01", periods=30)
+    # 30 days of £1000 gross sales, £100 returns (10% return rate)
+    df = pd.DataFrame({
+        "date": dates,
+        "gross_sales": [1000.0] * 30,
+        "sales": [900.0] * 30,
+        "returns": [100.0] * 30,
+        "order_count": [10] * 30,
+    })
+
+    recs = engine.analyze_dataset(daily_df=df)
+    return_rec = next((r for r in recs if r.category == RecommendationCategory.REVENUE_RISK and "Return" in r.title), None)
+    assert return_rec is not None
+    assert return_rec.priority == UrgencyLevel.CRITICAL  # 10% > 7%
+    assert return_rec.confidence == EvidenceConfidence.HIGH
+    assert "£3,000" in return_rec.quantified_impact
+    assert "10.00%" in return_rec.problem_statement
+    assert "suggested_action" in return_rec.to_dict()
+    assert "follow_up_metric" in return_rec.to_dict()
+
+
+def test_decision_support_market_concentration():
+    """Verify that market concentration triggers geographic diversification recommendations."""
+    engine = DecisionSupportEngine(currency_symbol="£")
+    dates = pd.date_range("2021-01-01", periods=14)
+    df = pd.DataFrame({"date": dates, "sales": [500.0] * 14})
+    countries_df = pd.DataFrame({
+        "Country": ["United Kingdom", "Germany", "France"],
+        "NetSales": [8500.0, 1000.0, 500.0],  # UK is 85%
+    })
+
+    recs = engine.analyze_dataset(daily_df=df, countries_df=countries_df)
+    geo_rec = next((r for r in recs if "Geographic" in r.title or "Market" in r.title), None)
+    assert geo_rec is not None
+    assert geo_rec.category == RecommendationCategory.REVENUE_RISK
+    assert geo_rec.priority == UrgencyLevel.HIGH
+    assert "85.0%" in geo_rec.root_cause_evidence
+
+
+def test_decision_support_weekend_dispatch_latency():
+    """Verify that zero Saturday dispatches triggers an INVENTORY_OPERATIONS recommendation."""
+    engine = DecisionSupportEngine(currency_symbol="£")
+    dates = pd.date_range("2021-01-01", periods=28)  # exactly 4 weeks
+    # Saturdays have 0 sales
+    sales = [0.0 if d.weekday() == 5 else 1000.0 for d in dates]
+    df = pd.DataFrame({"date": dates, "sales": sales})
+
+    recs = engine.analyze_dataset(daily_df=df)
+    ops_rec = next((r for r in recs if r.category == RecommendationCategory.INVENTORY_OPERATIONS), None)
+    assert ops_rec is not None
+    assert "Weekend" in ops_rec.title
+    assert "4 non-trading Saturdays" in ops_rec.root_cause_evidence
+
+
+def test_decision_support_forecast_degradation_alert():
+    """Verify that elevated forecast WAPE generates FORECAST_RELIABILITY recommendation."""
+    engine = DecisionSupportEngine(currency_symbol="$")
+    dates = pd.date_range("2021-01-01", periods=14)
+    df = pd.DataFrame({"date": dates, "sales": [500.0] * 14})
+
+    recs = engine.analyze_dataset(
+        daily_df=df,
+        forecast_metrics={"wape": 0.45, "bias_pct": 0.08, "model": "XGBoost", "horizon": "14_day"}
+    )
+    fc_rec = next((r for r in recs if r.category == RecommendationCategory.FORECAST_RELIABILITY), None)
+    assert fc_rec is not None
+    assert fc_rec.priority == UrgencyLevel.CRITICAL
+    assert "45.0%" in fc_rec.problem_statement
+    assert "+8.0%" in fc_rec.root_cause_evidence
+
+
+def test_decision_support_serialization():
+    """Verify that all recommendations serialize cleanly to dictionaries and JSON."""
+    engine = DecisionSupportEngine(currency_symbol="£")
+    dates = pd.date_range("2021-01-01", periods=14)
+    df = pd.DataFrame({
+        "date": dates,
+        "gross_sales": [1000.0] * 14,
+        "sales": [900.0] * 14,
+        "returns": [100.0] * 14,
+    })
+    recs = engine.analyze_dataset(daily_df=df, active_anomalies_count=3)
+    assert len(recs) >= 2
+
+    for r in recs:
+        d = r.to_dict()
+        assert isinstance(d, dict)
+        assert "id" in d
+        assert "title" in d
+        # Verify JSON serializability
+        dumped = json.dumps(d)
+        assert len(dumped) > 0
+

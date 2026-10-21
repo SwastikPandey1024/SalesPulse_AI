@@ -297,7 +297,26 @@ def process_and_aggregate_online_retail(
                 daily_stats[cal_date]["units_returned"] += abs(num_qty)
                 daily_stats[cal_date]["return_invoices"].add(inv_str)
                 all_ret_invoices.add(inv_str)
-                country_stats[country_str]["net_sales"] -= ret_val
+                # Product stats returns tracking
+                if stock_str:
+                    if stock_str not in product_stats:
+                        clean_desc = desc_str if desc_str else f"Unknown SKU ({stock_str})"
+                        product_stats[stock_str] = {
+                            "description": clean_desc,
+                            "units_sold": 0.0,
+                            "units_returned": 0.0,
+                            "gross_sales": 0.0,
+                            "returns": 0.0,
+                            "net_sales": 0.0,
+                            "order_count": 0,
+                            "return_count": 0,
+                        }
+                    product_stats[stock_str]["returns"] += ret_val
+                    product_stats[stock_str]["net_sales"] -= ret_val
+                    product_stats[stock_str]["units_returned"] += abs(num_qty)
+                    product_stats[stock_str]["return_count"] += 1
+                    if desc_str and product_stats[stock_str]["description"].startswith("Unknown SKU"):
+                        product_stats[stock_str]["description"] = desc_str
             else:
                 valid_tx_rows += 1
                 line_val = num_qty * num_price
@@ -313,14 +332,22 @@ def process_and_aggregate_online_retail(
                 # Product stats (top products tracking)
                 if stock_str:
                     if stock_str not in product_stats:
+                        clean_desc = desc_str if desc_str else f"Unknown SKU ({stock_str})"
                         product_stats[stock_str] = {
-                            "description": desc_str,
+                            "description": clean_desc,
                             "units_sold": 0.0,
+                            "units_returned": 0.0,
                             "gross_sales": 0.0,
+                            "returns": 0.0,
+                            "net_sales": 0.0,
+                            "order_count": 0,
+                            "return_count": 0,
                         }
                     product_stats[stock_str]["units_sold"] += num_qty
                     product_stats[stock_str]["gross_sales"] += line_val
-                    if desc_str and not product_stats[stock_str]["description"]:
+                    product_stats[stock_str]["net_sales"] += line_val
+                    product_stats[stock_str]["order_count"] += 1
+                    if desc_str and product_stats[stock_str]["description"].startswith("Unknown SKU"):
                         product_stats[stock_str]["description"] = desc_str
 
     wb.close()
@@ -391,16 +418,20 @@ def process_and_aggregate_online_retail(
     daily_csv_path = os.path.join(output_dir, "online_retail_ii_daily.csv")
     daily_df.to_csv(daily_csv_path, index=False)
 
-    # Save Top Products
+    # Save Top Products with Canonical Schema (product_id, description, units_sold, gross_sales, returns, net_sales, order_count)
     top_prods = []
     for s_code, p_data in product_stats.items():
+        desc = p_data["description"].strip() if p_data.get("description") else f"Unknown SKU ({s_code})"
         top_prods.append({
             "product_id": s_code,
-            "description": p_data["description"],
+            "description": desc,
             "units_sold": int(p_data["units_sold"]),
             "gross_sales": round(p_data["gross_sales"], 2),
+            "returns": round(p_data.get("returns", 0.0), 2),
+            "net_sales": round(p_data.get("net_sales", p_data["gross_sales"]), 2),
+            "order_count": int(p_data.get("order_count", 0)),
         })
-    top_prods_df = pd.DataFrame(top_prods).sort_values("gross_sales", ascending=False).head(100)
+    top_prods_df = pd.DataFrame(top_prods).sort_values("net_sales", ascending=False).head(100)
     top_prods_path = os.path.join(output_dir, "online_retail_ii_top_products.csv")
     top_prods_df.to_csv(top_prods_path, index=False)
 

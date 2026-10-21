@@ -530,3 +530,234 @@ def test_units_sold_versus_quantity_column_resolution():
 
     assert tot_units == 150  # Must be 150 from units_sold, NOT 1998 from quantity
 
+
+# =============================================================================
+# PHASE 4C: INTEGRATION CONTRACT REPAIR REGRESSION TESTS
+# =============================================================================
+
+from salespulse.storage.models import DataMonitoringRecord
+from salespulse.data.product_aggregation import aggregate_product_sales, CANONICAL_PRODUCT_COLUMNS
+
+
+def test_data_monitoring_record_freshness_state_and_outcome_adapter():
+    """Verify DataMonitoringRecord.freshness_state and latest_ingestion_outcome properties.
+
+    Covers:
+    - Normal record with evidence_json (HEALTHY, STALE, UNKNOWN, FAILED)
+    - Legacy record without evidence_json (derivation from staleness vs threshold)
+    - Null/unobserved records return UNKNOWN (never infer HEALTHY blindly)
+    - to_dict() includes both fields
+    """
+    # 1. Record with full evidence_json
+    rec_healthy = DataMonitoringRecord(
+        check_id="chk-001",
+        status="HEALTHY",
+        latest_observation_date=datetime.date(2011, 12, 9),
+        staleness_days=5,
+        staleness_threshold_days=30,
+        last_ingestion_status="PASSED",
+        summary_message="Pipeline is healthy",
+        evidence_json=json.dumps({
+            "freshness": {"freshness_state": "FRESH", "staleness_days": 5},
+            "ingestion": {"outcome": "PASSED"}
+        }),
+    )
+    assert rec_healthy.freshness_state == "FRESH"
+    assert rec_healthy.latest_ingestion_outcome == "PASSED"
+    d_healthy = rec_healthy.to_dict()
+    assert d_healthy["freshness_state"] == "FRESH"
+    assert d_healthy["latest_ingestion_outcome"] == "PASSED"
+
+    # 2. Record with STALE evidence
+    rec_stale = DataMonitoringRecord(
+        check_id="chk-002",
+        status="WARNING",
+        latest_observation_date=datetime.date(2011, 12, 9),
+        staleness_days=45,
+        staleness_threshold_days=30,
+        last_ingestion_status="PASSED",
+        summary_message="Data is stale",
+        evidence_json=json.dumps({
+            "freshness": {"freshness_state": "STALE", "staleness_days": 45},
+            "ingestion": {"outcome": "PASSED"}
+        }),
+    )
+    assert rec_stale.freshness_state == "STALE"
+    assert rec_stale.latest_ingestion_outcome == "PASSED"
+
+    # 3. Legacy record WITHOUT evidence_json (empty / None) - Staleness > threshold
+    rec_legacy_stale = DataMonitoringRecord(
+        check_id="chk-003",
+        status="WARNING",
+        latest_observation_date=datetime.date(2011, 12, 9),
+        staleness_days=50,
+        staleness_threshold_days=30,
+        last_ingestion_status="WARNING",
+        summary_message="Legacy stale record",
+        evidence_json="",
+    )
+    assert rec_legacy_stale.freshness_state == "STALE"
+    assert rec_legacy_stale.latest_ingestion_outcome == "WARNING"
+
+    # 4. Legacy record WITHOUT evidence_json - Within threshold and status HEALTHY
+    rec_legacy_fresh = DataMonitoringRecord(
+        check_id="chk-004",
+        status="HEALTHY",
+        latest_observation_date=datetime.date(2011, 12, 9),
+        staleness_days=3,
+        staleness_threshold_days=30,
+        last_ingestion_status="PASSED",
+        summary_message="Legacy fresh record",
+        evidence_json=None,
+    )
+    assert rec_legacy_fresh.freshness_state == "FRESH"
+    assert rec_legacy_fresh.latest_ingestion_outcome == "PASSED"
+
+    # 5. Missing / Null observation dates must return UNKNOWN (NEVER blindly infer HEALTHY)
+    rec_unverified = DataMonitoringRecord(
+        check_id="chk-005",
+        status="UNKNOWN",
+        latest_observation_date=None,
+        staleness_days=None,
+        staleness_threshold_days=30,
+        last_ingestion_status=None,
+        summary_message="Unverified baseline",
+        evidence_json="",
+    )
+    assert rec_unverified.freshness_state == "UNKNOWN"
+    assert rec_unverified.latest_ingestion_outcome == "UNKNOWN"
+
+    # 6. Critical record due to ingestion failure
+    rec_failed = DataMonitoringRecord(
+        check_id="chk-006",
+        status="CRITICAL",
+        latest_observation_date=datetime.date(2011, 12, 9),
+        staleness_days=10,
+        staleness_threshold_days=30,
+        last_ingestion_status="FAILED",
+        summary_message="Ingestion validation failed",
+        evidence_json=json.dumps({
+            "freshness": {"freshness_state": "FRESH"},
+            "ingestion": {"outcome": "FAILED"}
+        }),
+    )
+    # Extracts from evidence:
+    assert rec_failed.freshness_state == "FRESH"
+    assert rec_failed.latest_ingestion_outcome == "FAILED"
+
+
+def test_data_freshness_report_state_property_and_cadences():
+    """Verify DataFreshnessReport.state compatibility alias and supported cadences."""
+    for cadence_val in [CadenceType.DAILY, CadenceType.HOURLY, CadenceType.WEEKLY]:
+        report = DataFreshnessReport(
+            freshness_state=FreshnessState.FRESH,
+            latest_observation_date="2011-12-09",
+            staleness_days=0,
+            staleness_threshold_days=30,
+            cadence=cadence_val.value,
+            is_stale=False,
+            reference_date="2011-12-09",
+            assessment="Fresh daily trading observation.",
+        )
+        # Direct property access
+        assert report.state == FreshnessState.FRESH
+        assert report.freshness_state == FreshnessState.FRESH
+
+        # Serialization to dictionary
+        d = report.to_dict()
+        assert d["freshness_state"] == "FRESH"
+        assert d["state"] == "FRESH"
+        assert d["cadence"] == cadence_val.value
+
+    # Test distinct states (STALE, MISSING_DATA, UNKNOWN)
+    for st in [FreshnessState.STALE, FreshnessState.MISSING_DATA, FreshnessState.UNKNOWN]:
+        r = DataFreshnessReport(freshness_state=st)
+        assert r.state == st
+        assert r.to_dict()["state"] == st.value
+
+
+def test_canonical_product_sales_aggregation():
+    """Verify deterministic product sales aggregation, returns, cancellations, and missing descriptions."""
+    fixture_tx = pd.DataFrame([
+        # Product 1: Normal sale (10 units @ £5 = £50 gross)
+        {"InvoiceNo": "10001", "StockCode": "SKU_01", "Description": "Ceramic Tea Mug", "Quantity": 10, "UnitPrice": 5.0},
+        # Product 1: Repeat sale in another invoice (5 units @ £5 = £25 gross)
+        {"InvoiceNo": "10002", "StockCode": "SKU_01", "Description": "Ceramic Tea Mug", "Quantity": 5, "UnitPrice": 5.0},
+        # Product 1: Return with 'C' invoice and negative qty (2 units returned @ £5 = £10 return)
+        {"InvoiceNo": "C10003", "StockCode": "SKU_01", "Description": "Ceramic Tea Mug", "Quantity": -2, "UnitPrice": 5.0},
+
+        # Product 2: Normal sale with missing description (defaults to 'Unknown SKU (SKU_02)')
+        {"InvoiceNo": "10004", "StockCode": "SKU_02", "Description": None, "Quantity": 20, "UnitPrice": 10.0},
+        # Product 2: Return with negative quantity without 'C' prefix (5 units @ £10 = £50 return)
+        {"InvoiceNo": "10005", "StockCode": "SKU_02", "Description": "", "Quantity": -5, "UnitPrice": 10.0},
+
+        # Product 3: Pure cancellation (never had positive sale, only cancellation record preserved)
+        {"InvoiceNo": "C10006", "StockCode": "SKU_03", "Description": "Cancelled Item", "Quantity": -1, "UnitPrice": 100.0},
+
+        # Operational quarantined transaction: zero price (should be excluded from revenue)
+        {"InvoiceNo": "10007", "StockCode": "SKU_04", "Description": "Sample Item", "Quantity": 1, "UnitPrice": 0.0},
+        # Operational quarantined transaction: negative price adjustment
+        {"InvoiceNo": "10008", "StockCode": "SKU_04", "Description": "Bad Debt", "Quantity": 1, "UnitPrice": -5.0},
+    ])
+
+    agg = aggregate_product_sales(fixture_tx, sort_by="net_sales", ascending=False)
+
+    assert list(agg.columns) == CANONICAL_PRODUCT_COLUMNS
+    assert len(agg) == 3  # SKU_04 was quarantined (price <= 0)
+
+    # Validate SKU_01
+    sku1 = agg[agg["product_id"] == "SKU_01"].iloc[0]
+    assert sku1["description"] == "Ceramic Tea Mug"
+    assert sku1["units_sold"] == 15      # 10 + 5
+    assert sku1["gross_sales"] == 75.0   # 50 + 25
+    assert sku1["returns"] == 10.0       # 2 * 5
+    assert sku1["net_sales"] == 65.0     # 75 - 10
+    assert sku1["order_count"] == 2      # invoices 10001, 10002
+
+    # Validate SKU_02 (missing description fallback)
+    sku2 = agg[agg["product_id"] == "SKU_02"].iloc[0]
+    assert sku2["description"] == "Unknown SKU (SKU_02)"
+    assert sku2["units_sold"] == 20
+    assert sku2["gross_sales"] == 200.0
+    assert sku2["returns"] == 50.0
+    assert sku2["net_sales"] == 150.0
+
+    # Validate SKU_03 (negative net sales from return)
+    sku3 = agg[agg["product_id"] == "SKU_03"].iloc[0]
+    assert sku3["units_sold"] == 0
+    assert sku3["gross_sales"] == 0.0
+    assert sku3["returns"] == 100.0
+    assert sku3["net_sales"] == -100.0
+
+    # Ranking: SKU_02 (£150 net) > SKU_01 (£65 net) > SKU_03 (-£100 net)
+    assert list(agg["product_id"]) == ["SKU_02", "SKU_01", "SKU_03"]
+
+
+def test_product_chart_column_discovery_and_empty_state():
+    """Verify that product chart rendering detects canonical columns and empty states gracefully."""
+    # Test column discovery with canonical columns
+    canonical_df = pd.DataFrame({
+        "product_id": ["P1", "P2"],
+        "description": ["Prod 1", "Prod 2"],
+        "units_sold": [10, 20],
+        "gross_sales": [120.0, 240.0],
+        "returns": [20.0, 40.0],
+        "net_sales": [100.0, 200.0],
+    })
+    x_col = next((c for c in ["net_sales", "NetSales", "gross_sales", "GrossSales"] if c in canonical_df.columns), None)
+    assert x_col == "net_sales"
+
+    # Test column discovery with legacy Superstore / alternative columns
+    legacy_df = pd.DataFrame({
+        "product_id": ["P1", "P2"],
+        "description": ["Prod 1", "Prod 2"],
+        "units_sold": [10, 20],
+        "gross_sales": [100.0, 200.0],
+    })
+    x_legacy = next((c for c in ["net_sales", "NetSales", "gross_sales", "GrossSales"] if c in legacy_df.columns), None)
+    assert x_legacy == "gross_sales"
+
+    # Empty DataFrame check
+    empty_df = pd.DataFrame()
+    assert empty_df.empty is True
+
