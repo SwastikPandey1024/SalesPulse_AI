@@ -1,0 +1,108 @@
+{
+  "audit_metadata": {
+    "audit_timestamp_utc": "2026-10-21T11:51:36.405352+00:00",
+    "audit_script": "scripts/audit_dataset_accounting.py",
+    "duration_seconds": 254.85,
+    "dataset_name": "UCI Online Retail II",
+    "official_citation": "Chen, D. (2012). Online Retail II. UCI Machine Learning Repository. https://doi.org/10.24432/C5BW33",
+    "license": "Creative Commons Attribution 4.0 International (CC BY 4.0)"
+  },
+  "source_file_integrity": {
+    "xlsx_path": "data/raw/online_retail_II.xlsx",
+    "xlsx_size_bytes": 45622278,
+    "xlsx_sha256": "bcbe73b35f5b7babf197fb0cb983a11f5d9ff929078d4aa53d171b1f2df2e980",
+    "zip_info": {
+      "path": "data/raw/online_retail_ii.zip",
+      "size_bytes": 45622418,
+      "sha256": "572e36277c2390fbfde10664750731e0a86f55e33470d91919085f0408e67bfb",
+      "verified": true
+    },
+    "sheet_names": [
+      "Year 2009-2010",
+      "Year 2010-2011"
+    ],
+    "sheet_row_counts": {
+      "Year 2009-2010": 525462,
+      "Year 2010-2011": 541911
+    },
+    "total_raw_rows": 1067373,
+    "total_header_rows": 2,
+    "total_transaction_rows": 1067371
+  },
+  "source_row_accounting_partition": {
+    "description": "Mutually exclusive classification partition of all 1,067,371 source transaction rows",
+    "categories": {
+      "category_A_valid_positive_sales": 1041670,
+      "category_B_returns_and_cancellations": 19494,
+      "category_C_quarantined_zero_or_negative_price": 6207,
+      "category_D_zero_quantity_positive_price": 0,
+      "category_E_null_or_invalid_date": 0
+    },
+    "sub_categories": {
+      "B1_both_c_invoice_and_negative_quantity": 19493,
+      "B2_c_invoice_with_non_negative_quantity": 1,
+      "B3_negative_quantity_without_c_invoice": 0,
+      "C1_zero_price_missing_customer_id": 6131,
+      "C2_zero_price_with_customer_id": 71,
+      "C3_negative_price_adjustments": 5
+    },
+    "partition_sum": 1067371,
+    "total_transactions": 1067371,
+    "is_partition_exact": true,
+    "reconciliation_difference": 0
+  },
+  "financial_reconciliation_gbp": {
+    "currency": "GBP (\u00a3)",
+    "gross_sales": 20972594.57,
+    "returns_value": 1527415.0,
+    "net_sales": 19445179.57,
+    "units_sold": 11420305,
+    "units_returned": 490994,
+    "net_units": 10929311,
+    "unique_valid_invoices": 40077,
+    "unique_cancellation_invoices": 8292,
+    "total_unique_invoice_strings": 53628,
+    "total_unique_products": 5304,
+    "total_unique_countries": 43,
+    "average_order_value_gross": 523.31,
+    "average_order_value_net": 485.2,
+    "return_rate_percentage": 7.28
+  },
+  "temporal_coverage": {
+    "date_range_start": "2009-12-01",
+    "date_range_end": "2011-12-09",
+    "total_calendar_days": 739,
+    "observed_trading_days": 604,
+    "unobserved_calendar_days": 135,
+    "unobserved_dates_by_weekday": {
+      "Saturday": 104,
+      "Thursday": 3,
+      "Friday": 7,
+      "Sunday": 6,
+      "Monday": 11,
+      "Tuesday": 2,
+      "Wednesday": 2
+    },
+    "missing_date_policy": "ZERO_FILL_POLICY: Absent calendar days represent non-trading warehouse/dispatch days (predominantly Sundays and holidays). Reindexing to continuous daily frequency with 0.0 distinguishes calendar structure from missing or corrupted observations."
+  },
+  "data_quality_findings": {
+    "missing_customer_id_valid_sales": 236121,
+    "missing_customer_id_returns": 750,
+    "missing_customer_id_quarantined": 6136,
+    "total_missing_customer_ids": 243007,
+    "missing_descriptions_count": 4382,
+    "privacy_compliance": "No customer-identifying fields (Customer ID) are emitted in aggregate daily time series or dashboard metrics."
+  },
+  "daily_csv_reconciliation": {
+    "daily_csv_path": "data/processed/online_retail_ii_daily.csv",
+    "daily_csv_rows": 739,
+    "daily_csv_gross_sales": 20972594.55,
+    "daily_csv_returns": 1527415.0,
+    "daily_csv_net_sales": 19445179.55,
+    "gross_sales_delta": 0.02,
+    "returns_delta": 0.0,
+    "net_sales_delta": 0.02,
+    "delta_explanation": "Deltas reflect daily rounding per calendar day vs raw unrounded transaction sums."
+  },
+  "overall_audit_status": "PASSED"
+}

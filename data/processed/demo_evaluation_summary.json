@@ -1,0 +1,15 @@
+{
+  "status": "SUCCESS",
+  "dataset": "UCI Online Retail II",
+  "citation": "Chen, D. (2012). Online Retail II. UCI Machine Learning Repository. https://doi.org/10.24432/C5BW33",
+  "total_days_ingested": 739,
+  "anomalies_detected": 93,
+  "freshness_verdict": "HEALTHY",
+  "drift_verdict": "WARNING",
+  "drifted_features_count": 0,
+  "total_features_evaluated": 9,
+  "sample_forecast_run_id": "demo_forecast_1792581062",
+  "reconciled_steps": 14,
+  "total_duration_seconds": 7.38,
+  "timestamp_utc": "2026-10-21T11:11:02.653950+00:00"
+}

@@ -1,0 +1,29 @@
+{
+  "verdict": "WARNING",
+  "grain": "daily_aggregated",
+  "total_rows_read": 739,
+  "valid_rows_count": 739,
+  "quarantined_rows_count": 0,
+  "diagnostics": {},
+  "issues": [
+    {
+      "code": "INFO_EXTRA_COLUMNS",
+      "severity": "INFO",
+      "message": "Found 8 additional metadata columns: ['gross_sales', 'returns', 'order_count', 'return_count', 'units_sold']...",
+      "affected_count": 8,
+      "sample_rows": [],
+      "remediation": "Additional columns are preserved during ingestion and bypassed during daily aggregation."
+    },
+    {
+      "code": "WARN_NEGATIVE_DAILY_SALES",
+      "severity": "WARNING",
+      "message": "Detected 2 daily records with negative sales total (net returns exceeding revenue).",
+      "affected_count": 2,
+      "sample_rows": [
+        269,
+        400
+      ],
+      "remediation": "Review days with net negative sales to verify whether substantial merchandise returns occurred."
+    }
+  ]
+}
