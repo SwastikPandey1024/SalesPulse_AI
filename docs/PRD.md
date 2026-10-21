@@ -2,6 +2,13 @@
 
 ## SalesPulse AI – Intelligent Sales Analytics Dashboard
 
+- **Current Live Deployment:** [https://salespulseai.streamlit.app/](https://salespulseai.streamlit.app/)
+- **Source Code Repository:** [https://github.com/SwastikPandey1024/SalesPulse_AI](https://github.com/SwastikPandey1024/SalesPulse_AI)
+- **Deployment Platform:** Streamlit Community Cloud (Entrypoint: `app.py`)
+
+> [!NOTE]
+> **Deployment Architecture Note:** The hosted deployment at [`https://salespulseai.streamlit.app/`](https://salespulseai.streamlit.app/) serves as a live interactive demonstration of the current Streamlit dashboard application. It demonstrates the product capabilities outlined in this document using public reference datasets. Public availability of the hosted frontend does not constitute evidence of enterprise security hardening, multi-tenant isolation, or a publicly accessible FastAPI backend service.
+
 ---
 
 ## 🎯 Product Objective

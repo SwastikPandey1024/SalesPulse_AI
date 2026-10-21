@@ -1,10 +1,11 @@
 <div align="center">
 
-# 📊 SalesPulse AI v3.0 Production
+# 📊 SalesPulse AI v3.0 — Live Demo & Production Architecture
 ### *Autonomous Sales Analytics, Multi-Horizon ML Forecasting, Observability & Executive Decision-Support*
 
-[![Release v3.0](https://img.shields.io/badge/Release-v3.0.0_Production-4F46E5?style=for-the-badge&logo=github)](https://github.com/SwastikPandey1024/SalesPulse_AI)
+[![Open Live Demo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://salespulseai.streamlit.app/)
 [![Tests Passing](https://img.shields.io/badge/Tests-209_Passed-10B981?style=for-the-badge&logo=pytest)](https://github.com/SwastikPandey1024/SalesPulse_AI)
+[![Release Tag](https://img.shields.io/badge/Release-v3.0.0-4F46E5?style=for-the-badge&logo=github)](https://github.com/SwastikPandey1024/SalesPulse_AI/releases/tag/v3.0.0)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI_v0.115-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit_v1.43-FF4B4B?style=for-the-badge&logo=streamlit)](https://streamlit.io/)
@@ -13,9 +14,24 @@
 
 <br/>
 
-**[📖 Architecture Specs](docs/PRD.md)** • **[📡 Observability Guide](docs/OPERATOR_EXPERIENCE_AND_OBSERVABILITY.md)** • **[🖼️ Visual Walkthrough](docs/DASHBOARD_WALKTHROUGH.md)** • **[📐 Contracts](docs/INTEGRATION_CONTRACTS.md)** • **[🌐 Deployment](DEPLOYMENT.md)**
+**[🌐 Open Live Demo](https://salespulseai.streamlit.app/)** • **[📖 Architecture Specs](docs/PRD.md)** • **[📡 Observability Guide](docs/OPERATOR_EXPERIENCE_AND_OBSERVABILITY.md)** • **[🖼️ Visual Walkthrough](docs/DASHBOARD_WALKTHROUGH.md)** • **[📐 Contracts](docs/INTEGRATION_CONTRACTS.md)** • **[🚀 Deployment Guide](DEPLOYMENT.md)**
 
 </div>
+
+---
+
+## 🌐 Live Demo & Interactive Exploration
+
+Experience the full interactive dashboard live in your browser hosted on Streamlit Community Cloud:
+
+👉 **[Launch SalesPulse AI Live Demo (salespulseai.streamlit.app)](https://salespulseai.streamlit.app/)**
+
+> [!IMPORTANT]
+> **Public Hosted Demonstration vs. Enterprise Deployment:**
+> - **Demonstration Purpose:** The hosted application at [`https://salespulseai.streamlit.app/`](https://salespulseai.streamlit.app/) runs the complete Version 3.0 codebase with pre-loaded demonstration datasets (UCI Online Retail II and US Superstore), active machine-learning models (`XGBoost`, `RandomForest`, and composite `Ensemble`), and real-time interactive Plotly visualizations.
+> - **Data Privacy Notice:** The live demo is a shared public sandbox environment. **Do not upload confidential, proprietary, or personally identifiable customer records** to the public instance. For private or regulated enterprise data, deploy an isolated self-hosted instance following our [Deployment Guide](DEPLOYMENT.md).
+> - **Persistence & Compute Boundary:** The public instance runs on Streamlit Community Cloud with local ephemeral SQLite storage and shared resource limits. Demonstrations may sleep after periods of inactivity and reboot cleanly with fresh baseline storage.
+> - **API Boundary:** The optional FastAPI microservice (`salespulse.api.app`) is designed for local or dedicated private VPC deployment and is not publicly exposed by the Streamlit Cloud frontend host.
 
 ---
 
@@ -278,6 +294,14 @@ pytest -q
 
 ---
 
+## 🚀 Explore SalesPulse AI Today
+
+- **Test the Hosted Application:** Launch the live interactive dashboard directly at **[salespulseai.streamlit.app](https://salespulseai.streamlit.app/)**.
+- **Inspect the Visual Walkthrough:** View curated operational captures and feature breakdowns in [docs/DASHBOARD_WALKTHROUGH.md](docs/DASHBOARD_WALKTHROUGH.md).
+- **Deploy Your Own Instance:** Follow the step-by-step instructions in [DEPLOYMENT.md](DEPLOYMENT.md) to launch on Streamlit Community Cloud, Docker, or bare metal.
+
+---
+
 ## 📄 License & Attribution
 
 - **Application Software:** Licensed under the [MIT License](LICENSE).
@@ -287,5 +311,5 @@ pytest -q
 ---
 
 <div align="center">
-<strong>SalesPulse AI v3.0 Production</strong> • Built with rigorous engineering for real business operators.
+<strong>SalesPulse AI v3.0</strong> • Built with rigorous engineering for real business operators.
 </div>

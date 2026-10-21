@@ -1,8 +1,14 @@
 # SalesPulse AI — Operator Dashboard & Feature Walkthrough
 
-**Version:** 3.0.0 (Production Stabilization)
-**Target Audience:** Technical Reviewers, Data Engineers, Commercial Planners, MLOps Practitioners
-**Companion Documents:** [README](../README.md) • [Integration Contracts](INTEGRATION_CONTRACTS.md) • [Operator Observability Guide](OPERATOR_EXPERIENCE_AND_OBSERVABILITY.md)
+[![Open Live Demo](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://salespulseai.streamlit.app/)
+
+- **Version:** 3.0.0 (Production Stabilization)
+- **Live Application:** [https://salespulseai.streamlit.app/](https://salespulseai.streamlit.app/)
+- **Target Audience:** Technical Reviewers, Data Engineers, Commercial Planners, MLOps Practitioners
+- **Companion Documents:** [README](../README.md) • [Integration Contracts](INTEGRATION_CONTRACTS.md) • [Operator Observability Guide](OPERATOR_EXPERIENCE_AND_OBSERVABILITY.md) • [Deployment Guide](../DEPLOYMENT.md)
+
+> [!TIP]
+> **Explore the Live Dashboard:** You can launch the interactive live deployment directly at **[salespulseai.streamlit.app](https://salespulseai.streamlit.app/)** to navigate across all six workspaces. The screenshots below represent historical captured examples from demonstration verification runs and serve as an annotated architectural reference. Displayed values, dates, and metrics in live sessions may vary depending on active user interactions and database state.
 
 ---
 

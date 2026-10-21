@@ -12,6 +12,18 @@ The operator experience is structured around 6 dedicated workspaces:
 5. **Anomaly Monitor:** Explainable statistical time-series anomaly detection with scope, type, severity, and status filtering, overlay visualization, evidence cards, and operator triage resolution workflows.
 6. **System Health:** Operational readiness diagnostics covering SQLite WAL database status, schema version verification (`v2`), model registry candidate inventory, and cache management.
 
+### 1.1 Canonical Live Application & Operational Context
+
+The complete Version 3.0 operator interface is deployed live at:
+👉 **[https://salespulseai.streamlit.app/](https://salespulseai.streamlit.app/)**
+
+> [!IMPORTANT]
+> **Hosted Demo vs. Enterprise Operator Boundaries:**
+> - **Public Sandbox Environment:** The hosted deployment at [`https://salespulseai.streamlit.app/`](https://salespulseai.streamlit.app/) provides an interactive demonstration of all six workspaces using pre-loaded baseline datasets (UCI Online Retail II and US Superstore).
+> - **Decoupled Service Topology:** Accessing the Streamlit frontend does **not** imply that an external FastAPI service is publicly deployed. The hosted Streamlit application operates in self-contained local domain mode; the headless REST API (`salespulse.api.app`) is designed for local workstations or dedicated private VPC deployments.
+> - **State & Persistence Lifecycles:** On Streamlit Community Cloud, container disks are ephemeral. Uploaded files, custom triage notes, and persisted forecast runs stored in the local SQLite database reset upon container reboots. Enterprise deployments require persistent storage volumes or an external PostgreSQL instance.
+> - **Ingestion Health Integrity Policy:** In demo mode where a historical static archive is loaded, the Freshness SLA truthfully reports `NOT APPLICABLE (HISTORICAL DEMO ARCHIVE)`. An absence of ingestion history or lack of failure records must **never** be misdiagnosed or presented as positive proof of a healthy pipeline.
+
 ---
 
 ## 2. Workspace Navigation & Workflows
