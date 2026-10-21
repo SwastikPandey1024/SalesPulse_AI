@@ -188,14 +188,19 @@ class DataMonitoringService:
         ref_date: datetime.date,
     ) -> DataFreshnessReport:
         """Compute calendar freshness from latest observation date."""
+        cadence_str = config.cadence.value if hasattr(config.cadence, "value") else str(config.cadence)
+        zero_sales_count = stats.get("zero_sales_count", 0)
         latest_obs = stats.get("latest_observation_date")
+
         if latest_obs is None:
             return DataFreshnessReport(
                 freshness_state=FreshnessState.MISSING_DATA,
                 latest_observation_date=None,
                 staleness_days=None,
                 staleness_threshold_days=config.staleness_threshold_days,
+                cadence=cadence_str,
                 is_stale=False,
+                zero_sales_dates_count=zero_sales_count,
                 reference_date=ref_date.isoformat(),
                 assessment="No historical observation records exist for this scope.",
             )
@@ -213,8 +218,9 @@ class DataMonitoringService:
         state = FreshnessState.STALE if is_stale else FreshnessState.FRESH
 
         assessment = (
-            f"Observations are {delta_days} days old relative to {ref_date}. "
-            f"{'EXCEEDS' if is_stale else 'Within'} threshold of {config.staleness_threshold_days} days."
+            f"Observations are {delta_days} days old relative to {ref_date} ({cadence_str} cadence). "
+            f"{'EXCEEDS' if is_stale else 'Within'} threshold of {config.staleness_threshold_days} days. "
+            f"Verified zero-sales days: {zero_sales_count}."
         )
 
         return DataFreshnessReport(
@@ -222,7 +228,9 @@ class DataMonitoringService:
             latest_observation_date=obs_dt.isoformat(),
             staleness_days=delta_days,
             staleness_threshold_days=config.staleness_threshold_days,
+            cadence=cadence_str,
             is_stale=is_stale,
+            zero_sales_dates_count=zero_sales_count,
             reference_date=ref_date.isoformat(),
             assessment=assessment,
         )
@@ -236,6 +244,10 @@ class DataMonitoringService:
         latest_attempt = stats.get("latest_attempt")
         last_success = stats.get("last_successful_attempt")
         consecutive_failures = stats.get("consecutive_failures", 0)
+        hist_failures = stats.get("historical_failure_count", 0)
+        hist_successes = stats.get("historical_success_count", 0)
+        total_attempts = stats.get("total_attempts_evaluated", 0)
+        reliability_rate = stats.get("reliability_rate")
 
         if latest_attempt is None:
             return IngestionHealthReport(
@@ -243,6 +255,10 @@ class DataMonitoringService:
                 latest_attempt_at=None,
                 last_successful_ingestion_at=None,
                 consecutive_failures=0,
+                historical_failure_count=0,
+                historical_success_count=0,
+                total_attempts_evaluated=0,
+                reliability_rate=None,
                 recent_errors_count=0,
                 recent_warnings_count=0,
                 assessment="No dataset ingestion attempts have been recorded yet.",
@@ -272,9 +288,11 @@ class DataMonitoringService:
             except Exception:
                 pass
 
+        rel_str = f"{reliability_rate:.1f}%" if reliability_rate is not None else "N/A"
         assessment = (
             f"Most recent ingestion outcome: {outcome.value}. "
             f"Consecutive failures: {consecutive_failures}. "
+            f"Historical reliability: {rel_str} ({hist_successes}/{total_attempts} attempts succeeded). "
             f"Audit log ID: {latest_attempt.id} ({latest_attempt.file_name or 'unnamed'})."
         )
 
@@ -283,6 +301,10 @@ class DataMonitoringService:
             latest_attempt_at=latest_attempt.created_at.isoformat() if latest_attempt.created_at else None,
             last_successful_ingestion_at=last_success.created_at.isoformat() if last_success and last_success.created_at else None,
             consecutive_failures=consecutive_failures,
+            historical_failure_count=hist_failures,
+            historical_success_count=hist_successes,
+            total_attempts_evaluated=total_attempts,
+            reliability_rate=reliability_rate,
             recent_errors_count=latest_attempt.error_count,
             recent_warnings_count=latest_attempt.warning_count,
             latest_file_name=latest_attempt.file_name,
@@ -300,27 +322,29 @@ class DataMonitoringService:
         ingestion: IngestionHealthReport,
         config: MonitoringConfig,
     ) -> Tuple[MonitoringStatus, List[str], str]:
-        """Apply deterministic, trustworthy rules to decide overall health status."""
+        """Apply deterministic, trustworthy rules to decide overall health status.
+        
+        Documented Precedence Policy:
+        1. Telemetry / DB offline -> UNKNOWN
+        2. Trustworthy Baseline Absence -> UNKNOWN (or CRITICAL if latest attempt failed on uninitialized baseline)
+        3. CRITICAL: Consecutive failures >= threshold, latest ingestion FAILED, or severe staleness (> crit_staleness)
+        4. WARNING: Moderate staleness (> threshold), latest ingestion WARNING, or active validation warnings
+        5. HEALTHY: All signals present, verified, observations fresh, and latest attempt passed
+        """
         remediations: List[str] = []
+        crit_staleness = int(config.staleness_threshold_days * config.critical_staleness_multiplier)
+        cadence_label = config.cadence.value if hasattr(config.cadence, "value") else str(config.cadence)
 
-        # State 0: Missing or uninitialized baseline
-        if (
-            freshness.freshness_state == FreshnessState.MISSING_DATA
-            and ingestion.outcome == IngestionOutcome.NO_ATTEMPTS
-        ):
-            remediations.append("Upload and ingest an initial sales dataset to establish operational baseline.")
+        # Level 1: Telemetry check (caller handles db unavailable)
+        if freshness.freshness_state == FreshnessState.UNKNOWN or ingestion.outcome == IngestionOutcome.DATABASE_UNAVAILABLE:
+            remediations.append("Check SQLite storage readiness and filesystem permissions in System Health.")
             return (
                 MonitoringStatus.UNKNOWN,
                 remediations,
-                "No ingestion history or observation records exist in storage.",
+                "Telemetry or storage is unavailable; data freshness and ingestion health cannot be verified.",
             )
 
-        # State 1: CRITICAL triggers
-        # - Consecutive failures >= threshold (e.g. 2+ failed attempts in a row)
-        # - Most recent attempt failed with critical contract violations
-        # - Severe data staleness (> critical_staleness_multiplier * threshold, e.g. > 60 days)
-        crit_staleness = int(config.staleness_threshold_days * config.critical_staleness_multiplier)
-
+        # Severe consecutive failures override baseline absence (e.g. repeated failed initial ingestion attempts)
         if ingestion.consecutive_failures >= config.consecutive_failure_threshold:
             remediations.append(
                 f"Triage recurring pipeline errors: {ingestion.consecutive_failures} consecutive ingestion attempts have failed."
@@ -330,6 +354,29 @@ class DataMonitoringService:
                 MonitoringStatus.CRITICAL,
                 remediations,
                 f"Critical Ingestion Alert: {ingestion.consecutive_failures} consecutive ingestion attempts failed.",
+            )
+
+        # Level 2: Baseline absence (missing observations or no successful history)
+        has_trustworthy_baseline = (
+            freshness.latest_observation_date is not None
+            and freshness.staleness_days is not None
+            and freshness.freshness_state not in (FreshnessState.MISSING_DATA, FreshnessState.EMPTY_DATASET, FreshnessState.UNKNOWN)
+        )
+
+        if not has_trustworthy_baseline:
+            # If an attempt was made and it failed, escalate to CRITICAL
+            if ingestion.outcome == IngestionOutcome.FAILED:
+                remediations.append("Review Data Quality findings and remediate blocking contract violations on initial dataset.")
+                return (
+                    MonitoringStatus.CRITICAL,
+                    remediations,
+                    "Critical Ingestion Alert: Most recent dataset upload failed validation and was rejected.",
+                )
+            remediations.append("Upload and ingest an initial sales dataset to establish an operational observation baseline.")
+            return (
+                MonitoringStatus.UNKNOWN,
+                remediations,
+                "No ingestion history or trustworthy observation baseline exists for this scope.",
             )
 
         if ingestion.outcome == IngestionOutcome.FAILED:
@@ -348,13 +395,10 @@ class DataMonitoringService:
             return (
                 MonitoringStatus.CRITICAL,
                 remediations,
-                f"Critical Freshness Alert: Data is {freshness.staleness_days} days behind schedule.",
+                f"Critical Freshness Alert: Data is {freshness.staleness_days} days behind schedule ({cadence_label} cadence).",
             )
 
-        # State 2: WARNING triggers
-        # - Stale data (staleness_threshold_days < staleness <= critical_staleness)
-        # - Most recent ingestion passed with review flags/warnings
-        # - Validation warnings present
+        # Level 4: WARNING triggers
         if freshness.is_stale:
             remediations.append(
                 f"Dataset observations are {freshness.staleness_days} days old. Ingest recent sales data to maintain forecast calibration."
@@ -362,7 +406,7 @@ class DataMonitoringService:
             return (
                 MonitoringStatus.WARNING,
                 remediations,
-                f"Data Freshness Warning: Observations are {freshness.staleness_days} days old (threshold: {config.staleness_threshold_days} days).",
+                f"Data Freshness Warning: Observations are {freshness.staleness_days} days old (threshold: {config.staleness_threshold_days} days, {cadence_label} cadence).",
             )
 
         if ingestion.outcome == IngestionOutcome.WARNING:
@@ -381,11 +425,27 @@ class DataMonitoringService:
                 f"Data Quality Warning: {ingestion.recent_warnings_count} quality review flag(s) active.",
             )
 
-        # State 3: HEALTHY
+        # Level 5: HEALTHY (Strictly when all signals are verified, fresh, and passing)
+        if (
+            freshness.freshness_state == FreshnessState.FRESH
+            and freshness.staleness_days is not None
+            and freshness.staleness_days <= config.staleness_threshold_days
+            and ingestion.outcome in (IngestionOutcome.PASSED, IngestionOutcome.NO_ATTEMPTS)
+            and ingestion.consecutive_failures == 0
+            and ingestion.recent_warnings_count == 0
+        ):
+            return (
+                MonitoringStatus.HEALTHY,
+                [],
+                f"Data pipeline is healthy: observations are fresh ({freshness.staleness_days}d old) and ingestion satisfies all contracts ({cadence_label} cadence).",
+            )
+
+        # Fallback if any unverified state
+        remediations.append("Verify pipeline telemetry and baseline observation records.")
         return (
-            MonitoringStatus.HEALTHY,
-            [],
-            "Data pipeline is healthy: observations are fresh and the latest ingestion passed all contracts.",
+            MonitoringStatus.UNKNOWN,
+            remediations,
+            "Monitoring signals could not conclusively establish pipeline health.",
         )
 
     def _build_database_unavailable_verdict(
@@ -398,12 +458,16 @@ class DataMonitoringService:
         error_detail: Optional[str] = None,
     ) -> MonitoringVerdict:
         """Produce an explicit, honest UNKNOWN verdict when database storage is unreachable."""
+        cadence_str = config.cadence.value if hasattr(config.cadence, "value") else str(config.cadence)
         freshness = DataFreshnessReport(
             freshness_state=FreshnessState.UNKNOWN,
             latest_observation_date=None,
             staleness_days=None,
             staleness_threshold_days=config.staleness_threshold_days,
+            cadence=cadence_str,
             is_stale=False,
+            zero_sales_dates_count=0,
+            missing_calendar_dates_count=0,
             reference_date=ref_date.isoformat(),
             assessment="Database connection is unavailable; observation dates cannot be determined.",
         )
@@ -413,6 +477,10 @@ class DataMonitoringService:
             latest_attempt_at=None,
             last_successful_ingestion_at=None,
             consecutive_failures=0,
+            historical_failure_count=0,
+            historical_success_count=0,
+            total_attempts_evaluated=0,
+            reliability_rate=None,
             recent_errors_count=0,
             recent_warnings_count=0,
             assessment=f"Database connection error: {error_detail or 'Engine uninitialized'}",
@@ -464,6 +532,13 @@ class DataMonitoringService:
         except Exception as e:
             logger.error(f"Failed to query latest monitoring check: {e}")
             return None
+
+    def get_latest_monitoring_check(
+        self,
+        sales_scope: str = "TOTAL_STORE",
+    ) -> Optional[DataMonitoringRecord]:
+        """Alias for get_latest_check."""
+        return self.get_latest_check(sales_scope=sales_scope)
 
 
 # ----------------------------------------------------------------------------
