@@ -52,14 +52,19 @@ The operator experience is structured around 6 dedicated workspaces:
 
 ### 2.4 Data Quality Workspace
 - **Ingestion Protocol:** Accepts CSV or Excel tabular records. Safe ingestion automatically detects dataset grain (`TRANSACTION`, `DAILY_AGGREGATED`, `FEATURE_BATCH`).
-- **Data Freshness & Ingestion Monitoring (Phase 4A):**
-  - **Trustworthy Signals:** Evaluates last successful ingestion timestamp, latest attempt outcome, calendar observation freshness (staleness vs threshold), validation failure/warning counts, and consecutive failure escalations.
-  - **Deterministic Status States:**
-    - `HEALTHY`: Observations within staleness threshold, latest ingestion passed, zero consecutive failures.
-    - `WARNING`: Dataset stale ($> \text{threshold}$ days) or latest validation has non-blocking warnings.
-    - `CRITICAL`: Severe staleness ($> 2 \times \text{threshold}$), consecutive failures $\ge 2$, or latest validation failed.
-    - `UNKNOWN`: Database unavailable or uninitialized baseline; never falsely reports healthy when data is missing.
-  - **Operator Action:** Manual "🔄 Run Health Check" button evaluates state on demand without expensive reruns on every interaction.
+- **Data Freshness & Ingestion Monitoring (Phase 4A & 4A.1 Reliability Hardening):**
+  - **Trustworthy Signals:** Evaluates last successful ingestion timestamp, latest attempt outcome, calendar observation freshness (staleness vs threshold), validation failure/warning counts, consecutive failure escalations, and historical reliability rate.
+  - **Cadence-Aware Freshness SLAs:** Configurable per dataset scope (`HOURLY`, `DAILY`, `WEEKLY`, `MONTHLY`, `CUSTOM`) with deterministic UTC reference date handling.
+  - **Zero Sales vs Missing Data:** Legitimate zero-sales trading dates (`daily_sales == 0.0`) are treated as valid observations and never misdiagnosed as missing data or gap anomalies.
+  - **Deterministic Status Precedence Policy:**
+    1. **`UNKNOWN`:** Database offline, telemetry missing, or uninitialized observation baseline with no ingestion history.
+    2. **`CRITICAL`:** Recurring failures ($\ge 2$ consecutive), most recent ingestion `FAILED`, or severe staleness ($> \text{critical staleness multiplier} \times \text{threshold}$).
+    3. **`WARNING`:** Moderate staleness ($> \text{threshold}$ days for configured cadence), most recent ingestion outcome `WARNING`, or active validation flags.
+    4. **`HEALTHY`:** Strictly when all required signals pass, data is fresh within cadence SLA, zero consecutive failures, and latest attempt passed.
+  - **Current Health vs. Historical Reliability:** A successful ingestion attempt resets consecutive failures and restores current health to `HEALTHY`, but does NOT erase historical failures. The historical reliability rate (e.g. `100.0% (10/10)`) preserves long-term pipeline observability across the lookback window.
+  - **Privacy-Safe Audit Storage:** Sanitizes file paths to basenames and never records raw customer tabular rows, PII, credentials, or sensitive payloads in evidence JSON.
+  - **Operator Action:** Manual "🔄 Run Check" evaluates live health on-demand without expensive background executions during regular UI reruns.
+  - **Dual State Visibility:** Separately displays the live on-demand check results and the latest persisted storage snapshot with their respective UTC timestamps.
   - **Audit History:** Expandable log displaying historical monitoring check records, status transitions, and actionable remediations.
 - **Contract Enforcement:**
   - `PASSED`: All contracts met; records ready for downstream forecasting.
@@ -95,6 +100,25 @@ The operator experience is structured around 6 dedicated workspaces:
   - **Persistence Inventory:** Live counts of persisted forecast runs, anomalies, validation logs, and monitoring checks.
   - **Resource Caches:** Purges `@st.cache_resource` and `@st.cache_data` on demand.
 
+### E. Dataset Drift Monitoring (Phase 4B)
+Located in the **Data Quality Workspace (`tab_quality`)**, this layer provides explainable statistical surveillance over input distributions without retraining models or leaking sensitive customer rows.
+- **Reference Baselines:**
+  - Versioned baseline profiles (`DriftBaselineProfile`) storing deterministic summary statistics, quantile/histogram bin edges, and category proportions.
+  - Baseline promotion is explicit; creating a new baseline never silently replaces the active reference baseline during monitoring.
+  - Strict privacy: only aggregated statistics and RFC 8259 JSON profiles are persisted; raw customer rows are never stored.
+- **Explainable Metrics & Safeguards:**
+  - **Numeric Continuous Features:** Evaluated using the **Population Stability Index (PSI)**.
+    - $PSI < 0.10$: `NO_DRIFT` (stable distribution).
+    - $0.10 \le PSI < 0.25$: `WARNING` (moderate shift warranting monitoring).
+    - $PSI \ge 0.25$: `DRIFT` (significant divergence).
+    - Safeguards: Laplace / epsilon smoothing ($\epsilon = 10^{-4}$) to prevent $\ln(0)$ or division-by-zero errors. Features with zero standard deviation (constant in baseline) are checked for deviation without numerical overflow.
+  - **Categorical Features:** Evaluated using **Total Variation Distance (TVD)** and **Unseen Category Tracking**.
+    - $TVD = \frac{1}{2} \sum |P_{baseline}(c) - P_{current}(c)|$.
+    - Unseen categories exceeding 5% volume or $TVD \ge 0.25 \rightarrow$ `DRIFT`.
+  - **Data Quality & Schema Checks:** Missing baseline columns trigger critical `SCHEMA_CHANGE` drift; shifts in null rates $\ge 15\%$ elevate warnings.
+  - **Insufficient Data Safeguard:** If baseline or current sample size is $< 30$ rows, status is reported as `UNKNOWN` with actionable explanation, never falsely as `NO_DRIFT`.
+  - **Sales Calendar Context:** Temporal coverage and weekend proportions are evaluated to help operators distinguish genuine distribution shifts from intra-week calendar cycles.
+
 ---
 
 ## 3. Local Startup & Execution Instructions
@@ -104,7 +128,7 @@ The operator experience is structured around 6 dedicated workspaces:
 # In project root
 streamlit run app.py
 ```
-The application executes natively using local domain services (`ForecastingService`, `ValidationService`, `AnalyticsService`, `DataMonitoringService`, `AuditRepository`, `ModelRegistry`). A running FastAPI server is **not required**.
+The application executes natively using local domain services (`ForecastingService`, `ValidationService`, `AnalyticsService`, `DataMonitoringService`, `DatasetDriftService`, `AuditRepository`, `ModelRegistry`). A running FastAPI server is **not required**.
 
 ### Running Optional FastAPI Daemon
 ```powershell
@@ -112,39 +136,34 @@ uvicorn salespulse.api.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 ### Scheduling Boundary & Background Workers
-The monitoring service is deliberately decoupled from Streamlit reruns. In Phase 4A, no background daemon is spawned by the frontend. Instead, external schedulers (e.g., cron, Airflow DAG, systemd timer) invoke the programmatic entrypoint:
-```python
-from salespulse.monitoring.service import run_scheduled_monitoring_check
-from salespulse.monitoring.schemas import MonitoringConfig
-
-# Standard cron-scheduled run
-verdict = run_scheduled_monitoring_check(
-    sales_scope="TOTAL_STORE",
-    config=MonitoringConfig(staleness_threshold_days=30, consecutive_failure_threshold=2)
-)
-print(f"Monitoring check complete: {verdict.overall_status} (Freshness: {verdict.freshness.freshness_state})")
-```
+The monitoring service is deliberately decoupled from Streamlit reruns. In Phase 4A & 4B, no background daemon is spawned by the frontend. Instead, external schedulers (e.g., cron, Airflow DAG, systemd timer) invoke programmatic entrypoints on a defined cadence.
 
 ### Running Test Suites
 ```powershell
+# Run dataset drift monitoring tests
+pytest tests/test_drift.py -v
+
 # Run data freshness and ingestion monitoring tests
 pytest tests/test_monitoring.py -v
+
+# Run storage persistence and migration tests
+pytest tests/test_storage.py -v
 
 # Run dashboard integration tests
 pytest tests/test_dashboard.py -v
 
-# Run full project regression test suite
+# Run full project regression test suite (162 tests)
 pytest -v
 
 # Verify compilation
-python -m py_compile app.py
+python -m py_compile app.py salespulse/monitoring/drift_service.py salespulse/monitoring/drift_schemas.py
 ```
 
 ---
 
 ## 4. Known Limitations & Deferred Capabilities
 
-1. **Continuous Scheduler Daemon:** Phase 4A establishes the decoupled monitoring service and cron-ready entrypoint (`run_scheduled_monitoring_check`), but deliberately avoids launching an uncontrolled always-running background thread inside Streamlit. An external orchestrator or background worker process will be introduced when production deployment infrastructure is finalized.
-2. **Intra-Week Seasonality:** Automatic weekday/weekend stratification is deferred to Phase 4B. Current anomaly alerts require operator discernment for known cyclical days.
-3. **Online Learning & Retraining:** Model weights are fixed and read-only. Retraining and automated hyperparameter tuning are managed externally.
-4. **Multi-Tenant Permissions:** Role-based access control (RBAC) and user authentication are deferred; all operators currently share administrative visibility.
+1. **Continuous Scheduler Daemon:** Phase 4A/4B establishes decoupled monitoring services and cron-ready entrypoints, but deliberately avoids launching uncontrolled always-running background threads inside Streamlit. An external orchestrator or background worker process will be introduced when production deployment infrastructure is finalized.
+2. **Automated Model Retraining:** In accordance with platform governance, drift alerts provide actionable recommendations for operators; automatic retraining loops are deliberately not triggered without human sign-off.
+3. **Multi-Tenant Permissions:** Role-based access control (RBAC) and user authentication are deferred; all operators currently share administrative visibility.
+

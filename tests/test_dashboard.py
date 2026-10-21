@@ -284,3 +284,94 @@ def test_dashboard_legacy_helper_functions_parity():
     assert "icon" in insights[0]
     assert "title" in insights[0]
     assert "action" in insights[0]
+
+
+# ----------------------------------------------------------------------------
+# 8. Anomaly Overview Chart Tests (Empty, Single-Point, Multi-Point)
+# ----------------------------------------------------------------------------
+def test_build_anomaly_overview_figure_empty():
+    """Verify empty or None observations return (None, 'NO_OBSERVATIONS') without misleading axes."""
+    fig1, status1 = app.build_anomaly_overview_figure(actual_records=[], anomaly_records=[])
+    assert fig1 is None
+    assert status1 == "NO_OBSERVATIONS"
+
+    fig2, status2 = app.build_anomaly_overview_figure(actual_records=None)
+    assert fig2 is None
+    assert status2 == "NO_OBSERVATIONS"
+
+    # Malformed actuals without date or sales
+    fig3, status3 = app.build_anomaly_overview_figure(actual_records=[{"other_key": 123}])
+    assert fig3 is None
+    assert status3 == "NO_OBSERVATIONS"
+
+
+def test_build_anomaly_overview_figure_single_point():
+    """Verify single observation renders with lines+markers and padded non-zero date range."""
+    single_act = [
+        ActualSalesRecord(calendar_date=datetime.date(2026, 10, 21), daily_sales=175.0)
+    ]
+    fig, status = app.build_anomaly_overview_figure(actual_records=single_act, anomaly_records=[])
+    
+    assert fig is not None
+    assert status == "SINGLE_POINT"
+    assert len(fig.data) == 1
+    trace = fig.data[0]
+    assert trace.mode == "lines+markers"
+    assert list(trace.y) == [175.0]
+
+    # X-axis range must be explicitly padded by +/- 3 days to prevent zero-width microsecond axis
+    xaxis = fig.layout.xaxis
+    assert xaxis.range is not None
+    start_dt = pd.to_datetime(xaxis.range[0])
+    end_dt = pd.to_datetime(xaxis.range[1])
+    assert (end_dt - start_dt).days == 6
+    assert start_dt.date() == datetime.date(2026, 10, 18)
+    assert end_dt.date() == datetime.date(2026, 10, 24)
+    assert xaxis.dtick == 86400000.0  # 1 day in ms
+
+
+def test_build_anomaly_overview_figure_multi_point_with_and_without_anomalies():
+    """Verify multi-point series preserves normal continuous line rendering and anomaly overlays."""
+    multi_acts = [
+        ActualSalesRecord(calendar_date=datetime.date(2026, 10, 1), daily_sales=100.0),
+        ActualSalesRecord(calendar_date=datetime.date(2026, 10, 2), daily_sales=120.0),
+        ActualSalesRecord(calendar_date=datetime.date(2026, 10, 3), daily_sales=350.0),
+        ActualSalesRecord(calendar_date=datetime.date(2026, 10, 4), daily_sales=110.0),
+        ActualSalesRecord(calendar_date=datetime.date(2026, 10, 5), daily_sales=105.0),
+    ]
+
+    # Case A: Without anomalies
+    fig_no_ano, status_no_ano = app.build_anomaly_overview_figure(actual_records=multi_acts, anomaly_records=[])
+    assert fig_no_ano is not None
+    assert status_no_ano == "MULTI_POINT"
+    assert len(fig_no_ano.data) == 1
+    assert fig_no_ano.data[0].mode == "lines"
+    assert len(fig_no_ano.data[0].y) == 5
+
+    # Case B: With overlay anomaly
+    anomaly_rec = [
+        AnomalyRecord(
+            anomaly_id="ano_test_01",
+            observation_date=datetime.date(2026, 10, 3),
+            sales_scope="TOTAL_STORE",
+            anomaly_type="SALES_SURGE",
+            severity="CRITICAL",
+            direction="UP",
+            observed_value=350.0,
+            reference_center=110.0,
+            reference_spread=15.0,
+            anomaly_score=16.0,
+            threshold=3.0,
+            explanation="Statistical sales surge",
+            status="ACTIVE",
+        )
+    ]
+    fig_with_ano, status_with_ano = app.build_anomaly_overview_figure(actual_records=multi_acts, anomaly_records=anomaly_rec)
+    assert fig_with_ano is not None
+    assert status_with_ano == "MULTI_POINT"
+    assert len(fig_with_ano.data) == 2  # Daily sales line + anomaly marker
+    ano_trace = fig_with_ano.data[1]
+    assert ano_trace.mode == "markers"
+    assert list(ano_trace.y) == [350.0]
+    assert ano_trace.marker.color == "#DC2626"  # CRITICAL red
+
