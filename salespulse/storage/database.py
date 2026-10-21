@@ -153,5 +153,9 @@ def init_db(engine: Optional[Engine] = None, drop_all: bool = False) -> int:
                     conn.execute(text(f"PRAGMA user_version = {SCHEMA_VERSION};"))
                 current_version = SCHEMA_VERSION
                 logger.info(f"Upgraded database schema to {SCHEMA_VERSION}")
+        else:
+            # current_version == SCHEMA_VERSION: ensure all tables exist idempotently
+            Base.metadata.create_all(conn)
 
     return current_version
+

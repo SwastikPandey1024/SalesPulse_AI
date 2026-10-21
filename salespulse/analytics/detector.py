@@ -38,10 +38,12 @@ def compute_robust_scale(
     Returns:
         Tuple[float, bool]: (effective_scale, is_fallback_scale_used)
     """
-    if len(values) == 0:
+    arr = np.asarray(values, dtype=np.float64)
+    finite_vals = arr[np.isfinite(arr)]
+    if len(finite_vals) == 0:
         return max(zero_mad_minimum_scale, 1e-6), True
 
-    deviations = np.abs(values - center)
+    deviations = np.abs(finite_vals - center)
     mad = float(np.median(deviations))
     scale = scaling_constant * mad
 
@@ -49,7 +51,7 @@ def compute_robust_scale(
         return scale, False
 
     # Guardrail 1: Interquartile Range (IQR) scale
-    q75, q25 = np.percentile(values, [75, 25])
+    q75, q25 = np.percentile(finite_vals, [75, 25])
     iqr = float(q75 - q25)
     iqr_scale = iqr / 1.349
     if iqr_scale > 1e-9:
@@ -84,10 +86,15 @@ def generate_deterministic_anomaly_id(
     observation_date: str,
     anomaly_type: str,
     model_name: Optional[str] = None,
+    horizon_days: Optional[int] = None,
     step_ahead: Optional[int] = None,
+    forecast_run_id: Optional[str] = None,
 ) -> str:
     """Generate a reproducible, collision-free UUIDv5 based on business identifiers."""
-    seed = f"{sales_scope}|{observation_date}|{anomaly_type}|{model_name or 'NONE'}|{step_ahead or 0}"
+    seed = (
+        f"{sales_scope}|{observation_date}|{anomaly_type}|"
+        f"{model_name or 'NONE'}|{horizon_days or 0}|{step_ahead or 0}|{forecast_run_id or 'NONE'}"
+    )
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, seed))
 
 
@@ -149,8 +156,8 @@ def detect_sales_anomalies(
     work_df["parsed_date"] = pd.to_datetime(work_df["parsed_date"])
 
     # 4. Handle duplicates
-    # Aggregate multiple transactions on the same calendar day
-    work_df = work_df.groupby("parsed_date", as_index=False)[sales_col].sum()
+    # Aggregate multiple transactions on the same calendar day (min_count=1 preserves NaN for unobserved days)
+    work_df = work_df.groupby("parsed_date", as_index=False)[sales_col].sum(min_count=1)
     work_df = work_df.sort_values("parsed_date").reset_index(drop=True)
 
     # 5. Handle missing dates if requested
@@ -163,8 +170,18 @@ def detect_sales_anomalies(
         )
         work_df = work_df.set_index("parsed_date").reindex(full_idx, fill_value=0.0).reset_index()
 
-    # 6. Negative sales policy check
-    work_df[sales_col] = pd.to_numeric(work_df[sales_col], errors="coerce").fillna(0.0)
+    # 6. Missing and Negative sales policy checks
+    raw_sales_numeric = pd.to_numeric(work_df[sales_col], errors="coerce")
+    missing_mask = raw_sales_numeric.isna()
+    missing_values_count = int(missing_mask.sum())
+
+    if cfg.handle_missing_values == "SKIP" and missing_values_count > 0:
+        # Exclude unrecorded observations from detection to prevent artificial drop alerts
+        work_df = work_df[~missing_mask].copy()
+        work_df[sales_col] = raw_sales_numeric[~missing_mask]
+    else:
+        work_df[sales_col] = raw_sales_numeric.fillna(0.0)
+
     has_negative = (work_df[sales_col] < 0).any()
     if has_negative:
         if cfg.handle_negative_sales == "REJECT":
@@ -271,6 +288,7 @@ def detect_sales_anomalies(
         total_evaluated=n_points,
         anomalies_detected=len(anomalies),
         insufficient_history_count=insufficient_history_count,
+        missing_values_count=missing_values_count,
         anomalies=anomalies,
         config=cfg.__dict__,
     )
@@ -363,93 +381,110 @@ def detect_forecast_error_anomalies(
             config=cfg.__dict__,
         )
 
-    # 2. Sort strictly by target_date
-    compatible_items.sort(key=lambda x: x["target_date"])
+    # 2. Group items into strictly compatible evaluation streams: (scope, model, horizon, step)
+    streams: Dict[Tuple[str, str, int, int], List[Dict[str, Any]]] = {}
+    for it in compatible_items:
+        key = (
+            it.get("sales_scope") or target_scope,
+            it.get("model_name") or "DEFAULT_MODEL",
+            it.get("horizon_days") or 0,
+            it.get("step_ahead") or 0,
+        )
+        streams.setdefault(key, []).append(it)
 
     anomalies: List[AnomalyPoint] = []
     insufficient_history_count = 0
     now_utc = datetime.datetime.now(datetime.timezone.utc).isoformat()
-    n_items = len(compatible_items)
+    total_evaluated = 0
 
-    # 3. Rolling evaluation over historical error distribution
-    for i in range(n_items):
-        start_idx = max(0, i - cfg.window_size)
-        history_items = compatible_items[start_idx:i]
+    for stream_key, stream_items in streams.items():
+        # Sort each stream strictly by target_date
+        stream_items.sort(key=lambda x: x["target_date"])
+        n_stream = len(stream_items)
+        total_evaluated += n_stream
 
-        if len(history_items) < cfg.min_history:
-            insufficient_history_count += 1
-            continue
+        # 3. Rolling evaluation over historical error distribution of this compatible stream
+        for i in range(n_stream):
+            start_idx = max(0, i - cfg.window_size)
+            history_items = stream_items[start_idx:i]
 
-        curr_item = compatible_items[i]
-        curr_error = curr_item["absolute_error"]
-        hist_errors = np.array([h["absolute_error"] for h in history_items], dtype=np.float64)
+            if len(history_items) < cfg.min_history:
+                insufficient_history_count += 1
+                continue
 
-        center_err = float(np.median(hist_errors))
-        scale_err, is_fallback = compute_robust_scale(
-            hist_errors,
-            center=center_err,
-            scaling_constant=cfg.mad_scaling_constant,
-            zero_mad_minimum_scale=cfg.zero_mad_minimum_scale,
-        )
+            curr_item = stream_items[i]
+            curr_error = curr_item["absolute_error"]
+            hist_errors = np.array([h["absolute_error"] for h in history_items], dtype=np.float64)
 
-        err_deviation = curr_error - center_err
-        z_error = err_deviation / scale_err
-
-        # Only flag if error is unusually LARGE (positive z-score exceeding threshold)
-        if z_error < cfg.error_threshold:
-            continue
-
-        severity = classify_severity(z_error, cfg)
-        anomaly_id = generate_deterministic_anomaly_id(
-            sales_scope=target_scope,
-            observation_date=curr_item["date_str"],
-            anomaly_type=AnomalyType.FORECAST_ERROR_ANOMALY.value,
-            model_name=curr_item["model_name"],
-            step_ahead=curr_item["step_ahead"],
-        )
-
-        model_display = f" for model '{curr_item['model_name']}'" if curr_item.get("model_name") else ""
-        step_display = f" (step {curr_item['step_ahead']})" if curr_item.get("step_ahead") else ""
-
-        explanation = (
-            f"Observed forecast absolute error of ${curr_error:.2f}{model_display}{step_display} "
-            f"exceeded historical baseline median error (${center_err:.2f}) by {z_error:.2f} "
-            f"robust standard deviations (threshold {cfg.error_threshold:.2f}). "
-            f"Predicted: ${curr_item['predicted_value']:.2f}, Actual: ${curr_item['actual_value']:.2f}."
-        )
-        if is_fallback:
-            explanation += (
-                f" Historical error dispersion was zero; "
-                f"fallback scale of ${scale_err:.2f} was applied."
+            center_err = float(np.median(hist_errors))
+            scale_err, is_fallback = compute_robust_scale(
+                hist_errors,
+                center=center_err,
+                scaling_constant=cfg.mad_scaling_constant,
+                zero_mad_minimum_scale=cfg.zero_mad_minimum_scale,
             )
 
-        point = AnomalyPoint(
-            anomaly_id=anomaly_id,
-            observation_date=curr_item["date_str"],
-            sales_scope=target_scope,
-            anomaly_type=AnomalyType.FORECAST_ERROR_ANOMALY,
-            severity=severity,
-            direction=AnomalyDirection.HIGHER_THAN_EXPECTED,
-            observed_value=float(curr_error),
-            reference_center=float(center_err),
-            reference_spread=float(scale_err),
-            anomaly_score=float(z_error),
-            threshold=float(cfg.error_threshold),
-            explanation=explanation,
-            detection_timestamp=now_utc,
-            model_name=curr_item.get("model_name"),
-            forecast_run_id=curr_item.get("run_id"),
-            horizon_days=curr_item.get("horizon_days"),
-            step_ahead=curr_item.get("step_ahead"),
-            predicted_value=curr_item.get("predicted_value"),
-            dispersion_zero_fallback=is_fallback,
-        )
-        anomalies.append(point)
+            err_deviation = curr_error - center_err
+            z_error = err_deviation / scale_err
+
+            # Only flag if error is unusually LARGE (positive z-score exceeding threshold)
+            if z_error < cfg.error_threshold:
+                continue
+
+            severity = classify_severity(z_error, cfg)
+            anomaly_id = generate_deterministic_anomaly_id(
+                sales_scope=target_scope,
+                observation_date=curr_item["date_str"],
+                anomaly_type=AnomalyType.FORECAST_ERROR_ANOMALY.value,
+                model_name=curr_item["model_name"],
+                horizon_days=curr_item["horizon_days"],
+                step_ahead=curr_item["step_ahead"],
+                forecast_run_id=curr_item["run_id"],
+            )
+
+            model_display = f" for model '{curr_item['model_name']}'" if curr_item.get("model_name") else ""
+            step_display = f" (step {curr_item['step_ahead']})" if curr_item.get("step_ahead") else ""
+
+            explanation = (
+                f"Observed forecast absolute error of ${curr_error:.2f}{model_display}{step_display} "
+                f"exceeded historical baseline median error (${center_err:.2f}) by {z_error:.2f} "
+                f"robust standard deviations (threshold {cfg.error_threshold:.2f}). "
+                f"Predicted: ${curr_item['predicted_value']:.2f}, Actual: ${curr_item['actual_value']:.2f}."
+            )
+            if is_fallback:
+                explanation += (
+                    f" Historical error dispersion was zero; "
+                    f"fallback scale of ${scale_err:.2f} was applied."
+                )
+
+            point = AnomalyPoint(
+                anomaly_id=anomaly_id,
+                observation_date=curr_item["date_str"],
+                sales_scope=target_scope,
+                anomaly_type=AnomalyType.FORECAST_ERROR_ANOMALY,
+                severity=severity,
+                direction=AnomalyDirection.HIGHER_THAN_EXPECTED,
+                observed_value=float(curr_error),
+                reference_center=float(center_err),
+                reference_spread=float(scale_err),
+                anomaly_score=float(z_error),
+                threshold=float(cfg.error_threshold),
+                explanation=explanation,
+                detection_timestamp=now_utc,
+                status="ACTIVE",
+                model_name=curr_item.get("model_name"),
+                forecast_run_id=curr_item.get("run_id"),
+                horizon_days=curr_item.get("horizon_days"),
+                step_ahead=curr_item.get("step_ahead"),
+                predicted_value=curr_item.get("predicted_value"),
+                dispersion_zero_fallback=is_fallback,
+            )
+            anomalies.append(point)
 
     return AnomalyReport(
         report_id=report_id,
         target_scope=target_scope,
-        total_evaluated=n_items,
+        total_evaluated=total_evaluated,
         anomalies_detected=len(anomalies),
         insufficient_history_count=insufficient_history_count,
         anomalies=anomalies,

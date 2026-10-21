@@ -473,3 +473,193 @@ def test_analytics_service_end_to_end(memory_db, baseline_dates):
     assert persisted[0].anomaly_type == "SALES_SURGE"
     assert persisted[0].severity == "CRITICAL"
 
+
+# ----------------------------------------------------------------------------
+# 14. Weekly Seasonality Limitation Verification
+# ----------------------------------------------------------------------------
+
+def test_weekly_seasonality_limitation_and_synthetic_pattern():
+    """Verify and document that unadjusted rolling median flags recurring weekend surges.
+    
+    Limitation: A 14-day rolling window pools 10 weekdays and 4 weekend days. In a business
+    with 4x weekend traffic ($100 weekdays, $400 weekends), unadjusted baselines produce elevated
+    robust z-scores on weekends. Callers with weekly seasonality must deseasonalize.
+    """
+    # 28 days (4 weeks) with standard retail weekend effect: $100 Mon-Fri, $400 Sat-Sun
+    start = pd.Timestamp("2025-01-06")  # Monday
+    dates = [start + pd.Timedelta(days=i) for i in range(28)]
+    sales = []
+    for d in dates:
+        sales.append(400.0 if d.weekday() >= 5 else 100.0)
+
+    df = pd.DataFrame({"date": dates, "sales": sales})
+    # Sensitive or moderate threshold (1.75) highlights that unadjusted baseline produces z ~ 1.8 on normal weekends
+    cfg = AnomalyConfig(window_size=14, min_history=14, surge_threshold=1.75)
+
+    report = detect_sales_anomalies(df, config=cfg)
+
+    # Documented behavior: Weekend observations have elevated z-scores (~1.8) and trigger false alerts
+    weekend_anomalies = [a for a in report.anomalies if pd.Timestamp(a.observation_date).weekday() >= 5]
+    assert len(weekend_anomalies) > 0, (
+        "Documented limitation: unadjusted rolling baseline flags periodic weekend spikes as surges."
+    )
+    for wa in weekend_anomalies:
+        assert wa.anomaly_type == AnomalyType.SALES_SURGE
+        assert wa.observed_value == 400.0
+        assert wa.anomaly_score > 1.75
+
+
+# ----------------------------------------------------------------------------
+# 15. Missing Values Skip Policy (No False Drop Alarms)
+# ----------------------------------------------------------------------------
+
+def test_missing_values_skip_policy_prevents_false_drop_alerts(baseline_dates):
+    """Verify that unrecorded/NaN observations are skipped and tracked without false drop alerts."""
+    # 25 days: Day 20 has sales = NaN (missing measurement, not $0.00 sales)
+    sales = [500.0] * 20 + [np.nan] + [500.0] * 4
+    df = pd.DataFrame({"date": baseline_dates[:25], "sales": sales})
+
+    # Under default handle_missing_values="SKIP"
+    cfg = AnomalyConfig(window_size=14, min_history=14, handle_missing_values="SKIP")
+    report = detect_sales_anomalies(df, config=cfg)
+
+    # Missing date must be tracked and NOT flagged as a SALES_DROP to $0
+    assert report.missing_values_count == 1
+    drop_alerts = [a for a in report.anomalies if a.anomaly_type == AnomalyType.SALES_DROP]
+    assert len(drop_alerts) == 0
+
+
+# ----------------------------------------------------------------------------
+# 16. Multi-Horizon and Multi-Step Error Stream Isolation
+# ----------------------------------------------------------------------------
+
+def test_forecast_error_isolation_multiple_models_and_steps():
+    """Verify that step 14 errors do not pollute step 1 historical baselines, and models remain isolated."""
+    base_date = pd.Timestamp("2025-01-01")
+    items = []
+
+    # 15 days of Step 1 items for XGBoost: expected errors are low (~$10)
+    for i in range(15):
+        items.append({
+            "target_date": (base_date + pd.Timedelta(days=i)).strftime("%Y-%m-%d"),
+            "predicted_value": 500.0,
+            "actual_value": 510.0,  # Error = 10.0
+            "sales_scope": "TOTAL_STORE",
+            "model_name": "XGBoost",
+            "horizon_days": 14,
+            "step_ahead": 1,
+            "run_id": f"run-step1-{i}",
+        })
+
+    # 15 days of Step 14 items for XGBoost: naturally larger errors (~$150)
+    for i in range(15):
+        items.append({
+            "target_date": (base_date + pd.Timedelta(days=i)).strftime("%Y-%m-%d"),
+            "predicted_value": 500.0,
+            "actual_value": 650.0,  # Error = 150.0
+            "sales_scope": "TOTAL_STORE",
+            "model_name": "XGBoost",
+            "horizon_days": 14,
+            "step_ahead": 14,
+            "run_id": f"run-step14-{i}",
+        })
+
+    # Day 16: Step 1 error jumps to $80 (abnormal for step 1, but normal if pooled with step 14)
+    items.append({
+        "target_date": (base_date + pd.Timedelta(days=15)).strftime("%Y-%m-%d"),
+        "predicted_value": 500.0,
+        "actual_value": 580.0,  # Error = 80.0
+        "sales_scope": "TOTAL_STORE",
+        "model_name": "XGBoost",
+        "horizon_days": 14,
+        "step_ahead": 1,
+        "run_id": "run-step1-15",
+    })
+
+    cfg = AnomalyConfig(window_size=14, min_history=14, error_threshold=2.5)
+    report = detect_forecast_error_anomalies(items, config=cfg, target_scope="TOTAL_STORE")
+
+    # Day 16 step 1 must be flagged because its baseline only includes step 1 ($10 error), NOT step 14 ($150 error)
+    step1_anomalies = [a for a in report.anomalies if a.step_ahead == 1]
+    assert len(step1_anomalies) == 1
+    assert step1_anomalies[0].observed_value == 80.0
+    assert step1_anomalies[0].reference_center == 10.0  # Median of step 1 history
+
+
+# ----------------------------------------------------------------------------
+# 17. Distinct Anomaly IDs for Multiple Runs Targeting Same Date
+# ----------------------------------------------------------------------------
+
+def test_multiple_runs_targeting_same_date_have_distinct_anomaly_ids():
+    """Verify that distinct forecast runs targeting the same calendar date receive collision-free IDs."""
+    target_date = "2025-01-20"
+    id_run1 = generate_deterministic_anomaly_id(
+        sales_scope="TOTAL_STORE",
+        observation_date=target_date,
+        anomaly_type="FORECAST_ERROR_ANOMALY",
+        model_name="XGBoost",
+        horizon_days=7,
+        step_ahead=7,
+        forecast_run_id="run-xgb-7d",
+    )
+    id_run2 = generate_deterministic_anomaly_id(
+        sales_scope="TOTAL_STORE",
+        observation_date=target_date,
+        anomaly_type="FORECAST_ERROR_ANOMALY",
+        model_name="XGBoost",
+        horizon_days=14,
+        step_ahead=7,
+        forecast_run_id="run-xgb-14d",
+    )
+
+    assert id_run1 != id_run2, "Distinct forecast runs targeting the same date must not collide."
+
+
+# ----------------------------------------------------------------------------
+# 18. Anomaly Disappearance and Resolution Policy
+# ----------------------------------------------------------------------------
+
+def test_anomaly_disappearance_and_resolution_policy(memory_db):
+    """Verify that when a previously flagged anomaly disappears, it is marked RESOLVED in audit trail."""
+    repo = AuditRepository(memory_db)
+
+    # 1. Record an initial active anomaly
+    pt = AnomalyPoint(
+        anomaly_id="surge-20250120",
+        observation_date="2025-01-20",
+        sales_scope="STORE_RESOLVE_TEST",
+        anomaly_type=AnomalyType.SALES_SURGE,
+        severity=SeverityLevel.HIGH,
+        direction=AnomalyDirection.SURGE,
+        observed_value=2000.0,
+        reference_center=500.0,
+        reference_spread=50.0,
+        anomaly_score=30.0,
+        threshold=2.5,
+        explanation="Initial surge alert.",
+        detection_timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        status="ACTIVE",
+    )
+    repo.record_anomalies([pt])
+
+    # Verify active
+    active = repo.get_anomalies(sales_scope="STORE_RESOLVE_TEST", status="ACTIVE")
+    assert len(active) == 1
+    assert active[0].status == "ACTIVE"
+
+    # 2. Later re-evaluation: observation disappeared from active anomalies
+    resolved_count = repo.resolve_anomalies_for_scope(
+        sales_scope="STORE_RESOLVE_TEST",
+        current_active_ids=[],  # No active anomalies remain
+        resolution_reason="Corrected sales figure returned to historical bounds",
+    )
+    assert resolved_count == 1
+
+    # 3. Verify audit history is preserved (not deleted) but marked RESOLVED
+    all_recs = repo.get_anomalies(sales_scope="STORE_RESOLVE_TEST")
+    assert len(all_recs) == 1
+    assert all_recs[0].status == "RESOLVED"
+    assert all_recs[0].status_updated_at is not None
+    assert "RESOLVED - Corrected sales figure" in all_recs[0].explanation
+
+

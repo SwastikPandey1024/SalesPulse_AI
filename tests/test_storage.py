@@ -21,6 +21,7 @@ from salespulse.storage.database import (
     get_db_session,
     init_db,
     SCHEMA_VERSION,
+    Base,
 )
 from salespulse.storage.models import DatasetAuditLog, ForecastRunLog, ForecastItemLog, ActualSalesRecord
 from salespulse.storage.repository import AuditRepository
@@ -334,6 +335,33 @@ def test_schema_migration_v1_to_v2(tmp_path):
         res = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='anomaly_records';")).fetchone()
         assert res is not None
         assert res[0] == "anomaly_records"
+
+
+def test_schema_migration_failure_rollback(tmp_path, monkeypatch):
+    """Verify that an exception during migration rolls back and leaves schema version at 1."""
+    db_file = tmp_path / "rollback_v1.db"
+    engine = create_storage_engine(f"sqlite:///{db_file}")
+
+    # Set up v1 database
+    init_db(engine)
+    with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS anomaly_records;"))
+        conn.execute(text("PRAGMA user_version = 1;"))
+
+    # Force create_all to fail during migration
+    def _failing_create_all(*args, **kwargs):
+        raise RuntimeError("Simulated migration failure during table creation")
+
+    monkeypatch.setattr(Base.metadata, "create_all", _failing_create_all)
+
+    with pytest.raises(RuntimeError, match="Simulated migration failure"):
+        init_db(engine=engine)
+
+    # Verify user_version is NOT falsely bumped to 2
+    with engine.connect() as conn:
+        v = conn.execute(text("PRAGMA user_version;")).scalar()
+        assert v == 1
+
 
 
 

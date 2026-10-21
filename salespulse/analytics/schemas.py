@@ -56,6 +56,14 @@ class AnomalyConfig:
         severity_high_z: Lower z-score boundary for HIGH severity.
         severity_critical_z: Lower z-score boundary for CRITICAL severity.
         handle_negative_sales: Policy for negative sales: 'FLAG', 'REJECT', or 'TREAT_AS_RETURN'.
+        handle_missing_values: Policy for NaN/null sales: 'SKIP' (exclude without false alarm) or 'ZERO_FILL'.
+
+    NOTE ON WEEKLY SEASONALITY:
+    The standard 14-day rolling baseline pools weekdays and weekends together. In retail domains
+    with recurring intra-week patterns (e.g. Saturday shopping surges or weekend office closures),
+    unadjusted rolling baselines can produce false positive surge/drop alerts due to day-of-week
+    seasonality. For data with strong day-of-week seasonality, caller should deseasonalize or
+    use day-of-week stratified baselines.
     """
     window_size: int = 14
     min_history: int = 14
@@ -69,6 +77,7 @@ class AnomalyConfig:
     severity_high_z: float = 3.5
     severity_critical_z: float = 5.0
     handle_negative_sales: str = "TREAT_AS_RETURN"
+    handle_missing_values: str = "SKIP"
 
     def __post_init__(self):
         if self.window_size < 3:
@@ -108,6 +117,8 @@ class AnomalyPoint:
     threshold: float                        # Configured threshold applied
     explanation: str                        # Factual statistical explanation
     detection_timestamp: str                # ISO-8601 UTC
+    status: str = "ACTIVE"                  # ACTIVE, RESOLVED, or SUPERSEDED
+    status_updated_at: Optional[str] = None
     
     # Optional forecast metadata (populated when anomaly_type == FORECAST_ERROR_ANOMALY)
     model_name: Optional[str] = None
@@ -153,6 +164,7 @@ class AnomalyReport:
     total_evaluated: int
     anomalies_detected: int
     insufficient_history_count: int
+    missing_values_count: int = 0
     anomalies: List[AnomalyPoint] = field(default_factory=list)
     config: Dict[str, Any] = field(default_factory=dict)
     generated_at: str = field(
@@ -167,6 +179,7 @@ class AnomalyReport:
             "total_evaluated": self.total_evaluated,
             "anomalies_detected": self.anomalies_detected,
             "insufficient_history_count": self.insufficient_history_count,
+            "missing_values_count": self.missing_values_count,
             "anomalies": [a.to_dict() for a in self.anomalies],
             "config": sanitize_for_json(self.config),
             "generated_at": self.generated_at,

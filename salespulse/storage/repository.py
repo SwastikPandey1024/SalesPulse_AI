@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.engine import Engine
 
 from salespulse.storage.database import get_engine, get_db_session
-from salespulse.storage.models import DatasetAuditLog, ForecastRunLog, ForecastItemLog, ActualSalesRecord, AnomalyRecord
+from salespulse.storage.models import DatasetAuditLog, ForecastRunLog, ForecastItemLog, ActualSalesRecord, AnomalyRecord, DataMonitoringRecord
 from salespulse.data.contracts import ValidationReport, sanitize_for_json
 
 
@@ -488,6 +488,7 @@ class AuditRepository:
                     existing.step_ahead = p.step_ahead
                     existing.predicted_value = float(p.predicted_value) if p.predicted_value is not None else None
                     existing.dispersion_zero_fallback = bool(p.dispersion_zero_fallback)
+                    existing.status = getattr(p, "status", "ACTIVE")
                     existing.raw_json = raw_json
                     persisted.append(existing)
                 else:
@@ -505,6 +506,7 @@ class AuditRepository:
                         threshold=float(p.threshold),
                         explanation=str(p.explanation),
                         detection_timestamp=det_time,
+                        status=getattr(p, "status", "ACTIVE"),
                         model_name=p.model_name,
                         forecast_run_id=p.forecast_run_id,
                         horizon_days=p.horizon_days,
@@ -525,11 +527,79 @@ class AuditRepository:
         with get_db_session(self.engine) as s:
             return _execute(s)
 
+    def resolve_anomalies_for_scope(
+        self,
+        sales_scope: str,
+        current_active_ids: List[str],
+        resolution_reason: str = "Disappeared on re-evaluation / returned to normal bounds",
+        session: Optional[Session] = None,
+    ) -> int:
+        """Mark active anomalies as RESOLVED if they are no longer detected on rerun.
+        
+        Guarantees:
+        - Immutable audit trail: never hard-deletes historical records.
+        - Updates status to 'RESOLVED' and sets status_updated_at timestamp.
+        
+        Returns:
+            int: Number of anomaly records marked as RESOLVED.
+        """
+        def _execute(s: Session) -> int:
+            query = select(AnomalyRecord).where(
+                and_(
+                    AnomalyRecord.sales_scope == sales_scope,
+                    AnomalyRecord.status == "ACTIVE",
+                )
+            )
+            if current_active_ids:
+                query = query.where(~AnomalyRecord.anomaly_id.in_(current_active_ids))
+
+            records = s.execute(query).scalars().all()
+            now = datetime.datetime.now(datetime.timezone.utc)
+            for r in records:
+                r.status = "RESOLVED"
+                r.status_updated_at = now
+                if resolution_reason:
+                    r.explanation += f" [Status: RESOLVED - {resolution_reason}]"
+            s.flush()
+            return len(records)
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def update_anomaly_status(
+        self,
+        anomaly_id: str,
+        new_status: str = "RESOLVED",
+        resolution_note: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> bool:
+        """Update status of a specific anomaly record with timestamp and optional resolution note."""
+        def _execute(s: Session) -> bool:
+            record = s.execute(
+                select(AnomalyRecord).where(AnomalyRecord.anomaly_id == anomaly_id)
+            ).scalar_one_or_none()
+            if record is None:
+                return False
+            record.status = new_status
+            record.status_updated_at = datetime.datetime.now(datetime.timezone.utc)
+            if resolution_note:
+                record.explanation += f" [Resolution Note: {resolution_note}]"
+            s.flush()
+            return True
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
     def get_anomalies(
         self,
         sales_scope: Optional[str] = None,
         anomaly_type: Optional[str] = None,
         severity: Optional[str] = None,
+        status: Optional[str] = None,
         start_date: Optional[Union[datetime.date, str]] = None,
         end_date: Optional[Union[datetime.date, str]] = None,
         model_name: Optional[str] = None,
@@ -546,6 +616,8 @@ class AuditRepository:
                 query = query.where(AnomalyRecord.anomaly_type == anomaly_type)
             if severity:
                 query = query.where(AnomalyRecord.severity == severity)
+            if status:
+                query = query.where(AnomalyRecord.status == status)
             if model_name:
                 query = query.where(AnomalyRecord.model_name == model_name)
 
@@ -567,4 +639,283 @@ class AuditRepository:
             return _execute(session)
         with get_db_session(self.engine) as s:
             return _execute(s)
+
+    # ------------------------------------------------------------------------
+    # 6. Observability & Query Helpers for Operator Workspaces
+    # ------------------------------------------------------------------------
+    def list_forecast_runs(
+        self,
+        limit: int = 50,
+        model_name: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> List[ForecastRunLog]:
+        """Fetch recent forecast runs ordered by creation timestamp descending."""
+        def _execute(s: Session) -> List[ForecastRunLog]:
+            query = select(ForecastRunLog).options(selectinload(ForecastRunLog.items))
+            if model_name:
+                query = query.where(ForecastRunLog.model_name == model_name)
+            query = query.order_by(ForecastRunLog.created_at.desc()).limit(limit)
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def list_validations(
+        self,
+        limit: int = 50,
+        session: Optional[Session] = None,
+    ) -> List[DatasetAuditLog]:
+        """Fetch recent dataset validation audit records ordered by creation timestamp descending."""
+        def _execute(s: Session) -> List[DatasetAuditLog]:
+            query = select(DatasetAuditLog).order_by(DatasetAuditLog.created_at.desc()).limit(limit)
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_forecast_items(
+        self,
+        run_id: Optional[str] = None,
+        sales_scope: Optional[str] = None,
+        limit: int = 200,
+        session: Optional[Session] = None,
+    ) -> List[ForecastItemLog]:
+        """Fetch forecast items with optional run_id and scope filters."""
+        def _execute(s: Session) -> List[ForecastItemLog]:
+            query = select(ForecastItemLog)
+            if run_id:
+                query = query.where(ForecastItemLog.run_id == run_id)
+            if sales_scope:
+                query = query.where(ForecastItemLog.sales_scope == sales_scope)
+            query = query.order_by(ForecastItemLog.target_date.asc(), ForecastItemLog.step_ahead.asc()).limit(limit)
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def list_actual_sales(
+        self,
+        sales_scope: str = "TOTAL_STORE",
+        limit: int = 100,
+        session: Optional[Session] = None,
+    ) -> List[ActualSalesRecord]:
+        """Fetch actual sales records ordered by calendar date descending."""
+        def _execute(s: Session) -> List[ActualSalesRecord]:
+            query = (
+                select(ActualSalesRecord)
+                .where(ActualSalesRecord.sales_scope == sales_scope)
+                .order_by(ActualSalesRecord.calendar_date.desc())
+                .limit(limit)
+            )
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    # ------------------------------------------------------------------------
+    # 7. Data Freshness & Ingestion Monitoring Logging and Retrieval
+    # ------------------------------------------------------------------------
+    def record_monitoring_check(
+        self,
+        check_id: str,
+        status: str,
+        sales_scope: str = "TOTAL_STORE",
+        checked_at: Optional[datetime.datetime] = None,
+        last_successful_ingestion_at: Optional[datetime.datetime] = None,
+        last_ingestion_attempt_at: Optional[datetime.datetime] = None,
+        last_ingestion_status: Optional[str] = None,
+        latest_observation_date: Optional[Union[datetime.date, str]] = None,
+        staleness_days: Optional[int] = None,
+        staleness_threshold_days: int = 30,
+        consecutive_failures: int = 0,
+        error_count: int = 0,
+        warning_count: int = 0,
+        summary_message: str = "",
+        evidence: Optional[Union[Dict[str, Any], str]] = None,
+        session: Optional[Session] = None,
+    ) -> DataMonitoringRecord:
+        """Persist a data freshness and ingestion monitoring check idempotently."""
+        chk_time = checked_at or datetime.datetime.now(datetime.timezone.utc)
+        obs_date = (
+            datetime.date.fromisoformat(latest_observation_date)
+            if isinstance(latest_observation_date, str)
+            else latest_observation_date
+        )
+
+        import json
+        if isinstance(evidence, dict):
+            sanitized = sanitize_for_json(evidence)
+            ev_json = json.dumps(sanitized, allow_nan=False)
+        elif isinstance(evidence, str):
+            ev_json = evidence
+        else:
+            ev_json = "{}"
+
+        def _execute(s: Session) -> DataMonitoringRecord:
+            # Idempotent lookup
+            existing = s.execute(
+                select(DataMonitoringRecord).where(DataMonitoringRecord.check_id == check_id)
+            ).scalar_one_or_none()
+
+            if existing:
+                existing.status = status
+                existing.checked_at = chk_time
+                existing.sales_scope = sales_scope
+                existing.last_successful_ingestion_at = last_successful_ingestion_at
+                existing.last_ingestion_attempt_at = last_ingestion_attempt_at
+                existing.last_ingestion_status = last_ingestion_status
+                existing.latest_observation_date = obs_date
+                existing.staleness_days = staleness_days
+                existing.staleness_threshold_days = staleness_threshold_days
+                existing.consecutive_failures = consecutive_failures
+                existing.error_count = error_count
+                existing.warning_count = warning_count
+                existing.summary_message = summary_message
+                existing.evidence_json = ev_json
+                s.flush()
+                return existing
+
+            record = DataMonitoringRecord(
+                check_id=check_id,
+                checked_at=chk_time,
+                sales_scope=sales_scope,
+                status=status,
+                last_successful_ingestion_at=last_successful_ingestion_at,
+                last_ingestion_attempt_at=last_ingestion_attempt_at,
+                last_ingestion_status=last_ingestion_status,
+                latest_observation_date=obs_date,
+                staleness_days=staleness_days,
+                staleness_threshold_days=staleness_threshold_days,
+                consecutive_failures=consecutive_failures,
+                error_count=error_count,
+                warning_count=warning_count,
+                summary_message=summary_message,
+                evidence_json=ev_json,
+                created_at=datetime.datetime.now(datetime.timezone.utc),
+            )
+            s.add(record)
+            s.flush()
+            return record
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_monitoring_history(
+        self,
+        sales_scope: Optional[str] = None,
+        limit: int = 50,
+        session: Optional[Session] = None,
+    ) -> List[DataMonitoringRecord]:
+        """Fetch historical monitoring checks ordered by checked_at descending."""
+        def _execute(s: Session) -> List[DataMonitoringRecord]:
+            query = select(DataMonitoringRecord)
+            if sales_scope:
+                query = query.where(DataMonitoringRecord.sales_scope == sales_scope)
+            query = query.order_by(DataMonitoringRecord.checked_at.desc()).limit(limit)
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_latest_monitoring_check(
+        self,
+        sales_scope: str = "TOTAL_STORE",
+        session: Optional[Session] = None,
+    ) -> Optional[DataMonitoringRecord]:
+        """Retrieve most recent monitoring check for a given sales scope."""
+        def _execute(s: Session) -> Optional[DataMonitoringRecord]:
+            query = (
+                select(DataMonitoringRecord)
+                .where(DataMonitoringRecord.sales_scope == sales_scope)
+                .order_by(DataMonitoringRecord.checked_at.desc())
+                .limit(1)
+            )
+            return s.execute(query).scalar_one_or_none()
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_ingestion_summary_stats(
+        self,
+        sales_scope: str = "TOTAL_STORE",
+        lookback_attempts: int = 20,
+        session: Optional[Session] = None,
+    ) -> Dict[str, Any]:
+        """Gather trustworthy raw ingestion and observation signals from audit and actuals tables."""
+        def _execute(s: Session) -> Dict[str, Any]:
+            # 1. Fetch recent dataset validation attempts
+            recent_logs = (
+                s.execute(
+                    select(DatasetAuditLog)
+                    .order_by(DatasetAuditLog.created_at.desc())
+                    .limit(lookback_attempts)
+                )
+                .scalars()
+                .all()
+            )
+
+            latest_attempt = recent_logs[0] if recent_logs else None
+
+            # Find last successful ingestion (validation passed or usable)
+            last_success = next(
+                (log for log in recent_logs if log.validation_status == "PASSED" or log.is_usable),
+                None
+            )
+            # If not in recent lookback, run query for most recent success overall
+            if last_success is None and recent_logs:
+                last_success = s.execute(
+                    select(DatasetAuditLog)
+                    .where(DatasetAuditLog.is_usable.is_(True))
+                    .order_by(DatasetAuditLog.created_at.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+
+            # Calculate consecutive failures from latest attempt backward
+            consecutive_failures = 0
+            for log in recent_logs:
+                if log.validation_status == "FAILED" or not log.is_usable:
+                    consecutive_failures += 1
+                else:
+                    break
+
+            # 2. Query latest observation date from ground truth actuals
+            max_act_date = s.execute(
+                select(func.max(ActualSalesRecord.calendar_date))
+                .where(ActualSalesRecord.sales_scope == sales_scope)
+            ).scalar()
+
+            act_count = s.execute(
+                select(func.count(ActualSalesRecord.id))
+                .where(ActualSalesRecord.sales_scope == sales_scope)
+            ).scalar() or 0
+
+            return {
+                "latest_attempt": latest_attempt,
+                "last_successful_attempt": last_success,
+                "consecutive_failures": consecutive_failures,
+                "recent_attempts_count": len(recent_logs),
+                "latest_observation_date": max_act_date,
+                "actual_records_count": act_count,
+            }
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+
 

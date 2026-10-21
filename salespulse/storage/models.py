@@ -200,12 +200,15 @@ class AnomalyRecord(Base):
     step_ahead = Column(Integer, nullable=True)
     predicted_value = Column(Float, nullable=True)
     dispersion_zero_fallback = Column(Boolean, nullable=False, default=False)
+    status = Column(String(20), nullable=False, default="ACTIVE", index=True)
+    status_updated_at = Column(DateTime, nullable=True)
     raw_json = Column(Text, nullable=False)  # Strict RFC 8259 JSON payload
     created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
 
     __table_args__ = (
         Index("idx_anomaly_date_scope", "observation_date", "sales_scope"),
         Index("idx_anomaly_type_sev", "anomaly_type", "severity"),
+        Index("idx_anomaly_status", "status"),
     )
 
     def to_dict(self):
@@ -224,6 +227,8 @@ class AnomalyRecord(Base):
             "threshold": self.threshold,
             "explanation": self.explanation,
             "detection_timestamp": self.detection_timestamp.isoformat() if self.detection_timestamp else None,
+            "status": self.status,
+            "status_updated_at": self.status_updated_at.isoformat() if self.status_updated_at else None,
             "model_name": self.model_name,
             "forecast_run_id": self.forecast_run_id,
             "horizon_days": self.horizon_days,
@@ -232,4 +237,60 @@ class AnomalyRecord(Base):
             "dispersion_zero_fallback": self.dispersion_zero_fallback,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class DataMonitoringRecord(Base):
+    """Persistent audit record for an ingestion and data freshness monitoring check."""
+    __tablename__ = "data_monitoring_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    check_id = Column(String(64), unique=True, nullable=False, index=True)
+    checked_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False, index=True)
+    sales_scope = Column(String(50), nullable=False, default="TOTAL_STORE", index=True)
+    status = Column(String(20), nullable=False, index=True)  # HEALTHY, WARNING, CRITICAL, UNKNOWN
+    
+    # Freshness signals
+    last_successful_ingestion_at = Column(DateTime, nullable=True)
+    last_ingestion_attempt_at = Column(DateTime, nullable=True)
+    last_ingestion_status = Column(String(20), nullable=True)  # PASSED, WARNING, FAILED, NO_ATTEMPTS
+    latest_observation_date = Column(Date, nullable=True)
+    staleness_days = Column(Integer, nullable=True)
+    staleness_threshold_days = Column(Integer, nullable=False, default=30)
+    
+    # Ingestion failure signals
+    consecutive_failures = Column(Integer, nullable=False, default=0)
+    error_count = Column(Integer, nullable=False, default=0)
+    warning_count = Column(Integer, nullable=False, default=0)
+    
+    # Actionable diagnosis & evidence
+    summary_message = Column(Text, nullable=False)
+    evidence_json = Column(Text, nullable=False)  # Strict RFC 8259 JSON
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_mon_scope_checked", "sales_scope", "checked_at"),
+        Index("idx_mon_status", "status"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "check_id": self.check_id,
+            "checked_at": self.checked_at.isoformat() if self.checked_at else None,
+            "sales_scope": self.sales_scope,
+            "status": self.status,
+            "last_successful_ingestion_at": self.last_successful_ingestion_at.isoformat() if self.last_successful_ingestion_at else None,
+            "last_ingestion_attempt_at": self.last_ingestion_attempt_at.isoformat() if self.last_ingestion_attempt_at else None,
+            "last_ingestion_status": self.last_ingestion_status,
+            "latest_observation_date": self.latest_observation_date.isoformat() if self.latest_observation_date else None,
+            "staleness_days": self.staleness_days,
+            "staleness_threshold_days": self.staleness_threshold_days,
+            "consecutive_failures": self.consecutive_failures,
+            "error_count": self.error_count,
+            "warning_count": self.warning_count,
+            "summary_message": self.summary_message,
+            "evidence_json": self.evidence_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
 
