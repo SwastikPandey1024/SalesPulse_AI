@@ -294,3 +294,88 @@ class DataMonitoringRecord(Base):
         }
 
 
+class DriftBaselineRecord(Base):
+    """Persistent audit record for a versioned reference baseline used in dataset drift monitoring."""
+    __tablename__ = "drift_baselines"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    baseline_id = Column(String(64), unique=True, nullable=False, index=True)
+    sales_scope = Column(String(50), nullable=False, default="TOTAL_STORE", index=True)
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
+    data_window_start = Column(Date, nullable=True)
+    data_window_end = Column(Date, nullable=True)
+    row_count = Column(Integer, nullable=False, default=0)
+    feature_count = Column(Integer, nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=False, index=True)
+    source_file_name = Column(String(255), nullable=True)
+    source_file_sha256 = Column(String(64), nullable=True)
+    notes = Column(Text, nullable=True)
+    profile_json = Column(Text, nullable=False)  # Strict RFC 8259 JSON of DriftBaselineProfile
+
+    __table_args__ = (
+        Index("idx_drift_base_scope_active", "sales_scope", "is_active"),
+        Index("idx_drift_base_created", "created_at"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "baseline_id": self.baseline_id,
+            "sales_scope": self.sales_scope,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "data_window_start": self.data_window_start.isoformat() if self.data_window_start else None,
+            "data_window_end": self.data_window_end.isoformat() if self.data_window_end else None,
+            "row_count": self.row_count,
+            "feature_count": self.feature_count,
+            "is_active": self.is_active,
+            "source_file_name": self.source_file_name,
+            "source_file_sha256": self.source_file_sha256,
+            "notes": self.notes,
+            "profile_json": self.profile_json,
+        }
+
+
+class DriftCheckRecord(Base):
+    """Persistent audit record for a dataset drift evaluation execution."""
+    __tablename__ = "drift_check_records"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    check_id = Column(String(64), unique=True, nullable=False, index=True)
+    checked_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False, index=True)
+    sales_scope = Column(String(50), nullable=False, default="TOTAL_STORE", index=True)
+    baseline_id = Column(String(64), nullable=False, index=True)
+    overall_status = Column(String(20), nullable=False, index=True)  # NO_DRIFT, WARNING, DRIFT, UNKNOWN
+    current_row_count = Column(Integer, nullable=False, default=0)
+    baseline_row_count = Column(Integer, nullable=False, default=0)
+    total_features_evaluated = Column(Integer, nullable=False, default=0)
+    drifted_features_count = Column(Integer, nullable=False, default=0)
+    warning_features_count = Column(Integer, nullable=False, default=0)
+    summary_message = Column(Text, nullable=False)
+    report_json = Column(Text, nullable=False)  # Strict RFC 8259 JSON of DriftReport
+    created_at = Column(DateTime, default=lambda: datetime.datetime.now(datetime.timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_drift_check_scope_time", "sales_scope", "checked_at"),
+        Index("idx_drift_check_status", "overall_status"),
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "check_id": self.check_id,
+            "checked_at": self.checked_at.isoformat() if self.checked_at else None,
+            "sales_scope": self.sales_scope,
+            "baseline_id": self.baseline_id,
+            "overall_status": self.overall_status,
+            "current_row_count": self.current_row_count,
+            "baseline_row_count": self.baseline_row_count,
+            "total_features_evaluated": self.total_features_evaluated,
+            "drifted_features_count": self.drifted_features_count,
+            "warning_features_count": self.warning_features_count,
+            "summary_message": self.summary_message,
+            "report_json": self.report_json,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+

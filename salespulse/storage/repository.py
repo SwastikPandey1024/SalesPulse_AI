@@ -15,10 +15,19 @@ import numpy as np
 from sqlalchemy import select, update, and_, func
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.engine import Engine
-
 from salespulse.storage.database import get_engine, get_db_session
-from salespulse.storage.models import DatasetAuditLog, ForecastRunLog, ForecastItemLog, ActualSalesRecord, AnomalyRecord, DataMonitoringRecord
+from salespulse.storage.models import (
+    DatasetAuditLog,
+    ForecastRunLog,
+    ForecastItemLog,
+    ActualSalesRecord,
+    AnomalyRecord,
+    DataMonitoringRecord,
+    DriftBaselineRecord,
+    DriftCheckRecord,
+)
 from salespulse.data.contracts import ValidationReport, sanitize_for_json
+from salespulse.common.datetime_utils import parse_datetime_safe
 
 
 class AuditRepository:
@@ -256,6 +265,75 @@ class AuditRepository:
             # Reconcile all forecast items matching this date and scope
             self._reconcile_items_for_date_in_session(s, c_date, sales_scope, val)
             return record, was_created
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def ingest_actual_sales_batch(
+        self,
+        records: List[Dict[str, Any]],
+        sales_scope: str = "TOTAL_STORE",
+        source_file_sha256: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> Tuple[int, int, int]:
+        """Idempotently ingest a batch of actual daily sales and reconcile matching items.
+        
+        Args:
+            records: List of dicts, each containing 'calendar_date' (date or YYYY-MM-DD str)
+                     and 'daily_sales' (float or int).
+            sales_scope: Scope identifier (default: 'TOTAL_STORE').
+            source_file_sha256: Optional fingerprint of source file.
+            session: Optional existing transactional session.
+            
+        Returns:
+            Tuple[int, int, int]: (inserted_count, updated_count, reconciled_items_count)
+        """
+        def _execute(s: Session) -> Tuple[int, int, int]:
+            inserted = 0
+            updated = 0
+            total_reconciled = 0
+            now = datetime.datetime.now(datetime.timezone.utc)
+
+            for rec in records:
+                raw_d = rec.get("calendar_date") or rec.get("date")
+                raw_val = rec.get("daily_sales") if "daily_sales" in rec else rec.get("sales", 0.0)
+                if raw_d is None:
+                    continue
+                c_date = datetime.date.fromisoformat(str(raw_d)) if not isinstance(raw_d, datetime.date) else raw_d
+                val = float(raw_val)
+
+                stmt = select(ActualSalesRecord).where(
+                    and_(
+                        ActualSalesRecord.calendar_date == c_date,
+                        ActualSalesRecord.sales_scope == sales_scope,
+                    )
+                )
+                existing = s.execute(stmt).scalar_one_or_none()
+                if existing is None:
+                    record = ActualSalesRecord(
+                        calendar_date=c_date,
+                        sales_scope=sales_scope,
+                        daily_sales=val,
+                        source_file_sha256=source_file_sha256,
+                        created_at=now,
+                        updated_at=now,
+                    )
+                    s.add(record)
+                    inserted += 1
+                else:
+                    existing.daily_sales = val
+                    if source_file_sha256:
+                        existing.source_file_sha256 = source_file_sha256
+                    existing.updated_at = now
+                    updated += 1
+
+                reconciled = self._reconcile_items_for_date_in_session(s, c_date, sales_scope, val)
+                total_reconciled += reconciled
+
+            s.flush()
+            return inserted, updated, total_reconciled
 
         if session is not None:
             return _execute(session)
@@ -743,7 +821,9 @@ class AuditRepository:
         session: Optional[Session] = None,
     ) -> DataMonitoringRecord:
         """Persist a data freshness and ingestion monitoring check idempotently."""
-        chk_time = checked_at or datetime.datetime.now(datetime.timezone.utc)
+        chk_time = parse_datetime_safe(checked_at) or datetime.datetime.now(datetime.timezone.utc)
+        last_succ_dt = parse_datetime_safe(last_successful_ingestion_at)
+        last_att_dt = parse_datetime_safe(last_ingestion_attempt_at)
         obs_date = (
             datetime.date.fromisoformat(latest_observation_date)
             if isinstance(latest_observation_date, str)
@@ -769,8 +849,8 @@ class AuditRepository:
                 existing.status = status
                 existing.checked_at = chk_time
                 existing.sales_scope = sales_scope
-                existing.last_successful_ingestion_at = last_successful_ingestion_at
-                existing.last_ingestion_attempt_at = last_ingestion_attempt_at
+                existing.last_successful_ingestion_at = last_succ_dt
+                existing.last_ingestion_attempt_at = last_att_dt
                 existing.last_ingestion_status = last_ingestion_status
                 existing.latest_observation_date = obs_date
                 existing.staleness_days = staleness_days
@@ -788,8 +868,8 @@ class AuditRepository:
                 checked_at=chk_time,
                 sales_scope=sales_scope,
                 status=status,
-                last_successful_ingestion_at=last_successful_ingestion_at,
-                last_ingestion_attempt_at=last_ingestion_attempt_at,
+                last_successful_ingestion_at=last_succ_dt,
+                last_ingestion_attempt_at=last_att_dt,
                 last_ingestion_status=last_ingestion_status,
                 latest_observation_date=obs_date,
                 staleness_days=staleness_days,
@@ -892,6 +972,16 @@ class AuditRepository:
                 else:
                     break
 
+            # Calculate historical lookback reliability
+            historical_failure_count = sum(1 for log in recent_logs if log.validation_status == "FAILED" or not log.is_usable)
+            historical_success_count = sum(1 for log in recent_logs if log.validation_status == "PASSED" or log.is_usable)
+            total_attempts_evaluated = len(recent_logs)
+            reliability_rate = (
+                (historical_success_count / total_attempts_evaluated * 100.0)
+                if total_attempts_evaluated > 0
+                else None
+            )
+
             # 2. Query latest observation date from ground truth actuals
             max_act_date = s.execute(
                 select(func.max(ActualSalesRecord.calendar_date))
@@ -903,13 +993,45 @@ class AuditRepository:
                 .where(ActualSalesRecord.sales_scope == sales_scope)
             ).scalar() or 0
 
+            # Verified zero-sales dates count
+            zero_sales_count = s.execute(
+                select(func.count(ActualSalesRecord.id))
+                .where(
+                    and_(
+                        ActualSalesRecord.sales_scope == sales_scope,
+                        ActualSalesRecord.daily_sales == 0.0,
+                    )
+                )
+            ).scalar() or 0
+
+            # If max_act_date is None or to augment from latest usable audit report
+            effective_observation_date = max_act_date
+            if last_success and last_success.report_json:
+                try:
+                    import json
+                    r_data = json.loads(last_success.report_json)
+                    diag = r_data.get("diagnostics", {})
+                    cov = diag.get("date_coverage", {})
+                    diag_max_str = cov.get("max_date")
+                    if diag_max_str:
+                        diag_max = datetime.date.fromisoformat(diag_max_str)
+                        if effective_observation_date is None or diag_max > effective_observation_date:
+                            effective_observation_date = diag_max
+                except Exception:
+                    pass
+
             return {
                 "latest_attempt": latest_attempt,
                 "last_successful_attempt": last_success,
                 "consecutive_failures": consecutive_failures,
-                "recent_attempts_count": len(recent_logs),
-                "latest_observation_date": max_act_date,
+                "historical_failure_count": historical_failure_count,
+                "historical_success_count": historical_success_count,
+                "total_attempts_evaluated": total_attempts_evaluated,
+                "reliability_rate": reliability_rate,
+                "recent_attempts_count": total_attempts_evaluated,
+                "latest_observation_date": effective_observation_date,
                 "actual_records_count": act_count,
+                "zero_sales_count": zero_sales_count,
             }
 
         if session is not None:
@@ -917,5 +1039,277 @@ class AuditRepository:
         with get_db_session(self.engine) as s:
             return _execute(s)
 
+    # ------------------------------------------------------------------------
+    # 8. Dataset Drift Monitoring Persistence
+    # ------------------------------------------------------------------------
+    def create_drift_baseline(
+        self,
+        baseline_id: str,
+        profile_json: str,
+        sales_scope: str = "TOTAL_STORE",
+        created_at: Optional[datetime.datetime] = None,
+        data_window_start: Optional[Union[datetime.date, str]] = None,
+        data_window_end: Optional[Union[datetime.date, str]] = None,
+        row_count: int = 0,
+        feature_count: int = 0,
+        is_active: bool = False,
+        source_file_name: Optional[str] = None,
+        source_file_sha256: Optional[str] = None,
+        notes: Optional[str] = None,
+        session: Optional[Session] = None,
+    ) -> DriftBaselineRecord:
+        """Persist a reference baseline definition idempotently.
+        
+        If is_active is True, any existing active baseline for the same sales_scope
+        is cleanly deactivated within the same transaction.
+        """
+        c_time = created_at or datetime.datetime.now(datetime.timezone.utc)
+        win_start = (
+            datetime.date.fromisoformat(data_window_start)
+            if isinstance(data_window_start, str)
+            else data_window_start
+        )
+        win_end = (
+            datetime.date.fromisoformat(data_window_end)
+            if isinstance(data_window_end, str)
+            else data_window_end
+        )
 
+        def _execute(s: Session) -> DriftBaselineRecord:
+            if is_active:
+                s.execute(
+                    update(DriftBaselineRecord)
+                    .where(DriftBaselineRecord.sales_scope == sales_scope)
+                    .values(is_active=False)
+                )
 
+            existing = s.execute(
+                select(DriftBaselineRecord).where(DriftBaselineRecord.baseline_id == baseline_id)
+            ).scalar_one_or_none()
+
+            if existing:
+                existing.profile_json = profile_json
+                existing.sales_scope = sales_scope
+                existing.data_window_start = win_start
+                existing.data_window_end = win_end
+                existing.row_count = row_count
+                existing.feature_count = feature_count
+                existing.is_active = is_active
+                existing.source_file_name = source_file_name
+                existing.source_file_sha256 = source_file_sha256
+                existing.notes = notes
+                s.flush()
+                return existing
+
+            record = DriftBaselineRecord(
+                baseline_id=baseline_id,
+                sales_scope=sales_scope,
+                created_at=c_time,
+                data_window_start=win_start,
+                data_window_end=win_end,
+                row_count=row_count,
+                feature_count=feature_count,
+                is_active=is_active,
+                source_file_name=source_file_name,
+                source_file_sha256=source_file_sha256,
+                notes=notes,
+                profile_json=profile_json,
+            )
+            s.add(record)
+            s.flush()
+            return record
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_active_drift_baseline(
+        self,
+        sales_scope: str = "TOTAL_STORE",
+        session: Optional[Session] = None,
+    ) -> Optional[DriftBaselineRecord]:
+        """Fetch the currently active reference baseline for a given sales scope."""
+        def _execute(s: Session) -> Optional[DriftBaselineRecord]:
+            query = (
+                select(DriftBaselineRecord)
+                .where(
+                    and_(
+                        DriftBaselineRecord.sales_scope == sales_scope,
+                        DriftBaselineRecord.is_active.is_(True),
+                    )
+                )
+                .order_by(DriftBaselineRecord.created_at.desc())
+                .limit(1)
+            )
+            return s.execute(query).scalar_one_or_none()
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_drift_baseline(
+        self,
+        baseline_id: str,
+        session: Optional[Session] = None,
+    ) -> Optional[DriftBaselineRecord]:
+        """Fetch a reference baseline by its unique identifier."""
+        def _execute(s: Session) -> Optional[DriftBaselineRecord]:
+            query = select(DriftBaselineRecord).where(DriftBaselineRecord.baseline_id == baseline_id)
+            return s.execute(query).scalar_one_or_none()
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def list_drift_baselines(
+        self,
+        sales_scope: Optional[str] = None,
+        limit: int = 50,
+        session: Optional[Session] = None,
+    ) -> List[DriftBaselineRecord]:
+        """List reference baselines ordered by creation time descending."""
+        def _execute(s: Session) -> List[DriftBaselineRecord]:
+            query = select(DriftBaselineRecord)
+            if sales_scope:
+                query = query.where(DriftBaselineRecord.sales_scope == sales_scope)
+            query = query.order_by(DriftBaselineRecord.created_at.desc()).limit(limit)
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def promote_drift_baseline(
+        self,
+        baseline_id: str,
+        sales_scope: str = "TOTAL_STORE",
+        session: Optional[Session] = None,
+    ) -> Optional[DriftBaselineRecord]:
+        """Explicitly promote a baseline to active status for a scope, deactivating all others."""
+        def _execute(s: Session) -> Optional[DriftBaselineRecord]:
+            target = s.execute(
+                select(DriftBaselineRecord).where(DriftBaselineRecord.baseline_id == baseline_id)
+            ).scalar_one_or_none()
+            if not target:
+                return None
+
+            scope = target.sales_scope or sales_scope
+            s.execute(
+                update(DriftBaselineRecord)
+                .where(DriftBaselineRecord.sales_scope == scope)
+                .values(is_active=False)
+            )
+            target.is_active = True
+            s.flush()
+            return target
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def record_drift_check(
+        self,
+        check_id: str,
+        baseline_id: str,
+        overall_status: str,
+        summary_message: str,
+        report_json: str,
+        sales_scope: str = "TOTAL_STORE",
+        checked_at: Optional[datetime.datetime] = None,
+        current_row_count: int = 0,
+        baseline_row_count: int = 0,
+        total_features_evaluated: int = 0,
+        drifted_features_count: int = 0,
+        warning_features_count: int = 0,
+        session: Optional[Session] = None,
+    ) -> DriftCheckRecord:
+        """Persist a dataset drift check report idempotently."""
+        chk_time = checked_at or datetime.datetime.now(datetime.timezone.utc)
+
+        def _execute(s: Session) -> DriftCheckRecord:
+            existing = s.execute(
+                select(DriftCheckRecord).where(DriftCheckRecord.check_id == check_id)
+            ).scalar_one_or_none()
+
+            if existing:
+                existing.baseline_id = baseline_id
+                existing.overall_status = overall_status
+                existing.summary_message = summary_message
+                existing.report_json = report_json
+                existing.sales_scope = sales_scope
+                existing.checked_at = chk_time
+                existing.current_row_count = current_row_count
+                existing.baseline_row_count = baseline_row_count
+                existing.total_features_evaluated = total_features_evaluated
+                existing.drifted_features_count = drifted_features_count
+                existing.warning_features_count = warning_features_count
+                s.flush()
+                return existing
+
+            record = DriftCheckRecord(
+                check_id=check_id,
+                checked_at=chk_time,
+                sales_scope=sales_scope,
+                baseline_id=baseline_id,
+                overall_status=overall_status,
+                current_row_count=current_row_count,
+                baseline_row_count=baseline_row_count,
+                total_features_evaluated=total_features_evaluated,
+                drifted_features_count=drifted_features_count,
+                warning_features_count=warning_features_count,
+                summary_message=summary_message,
+                report_json=report_json,
+                created_at=datetime.datetime.now(datetime.timezone.utc),
+            )
+            s.add(record)
+            s.flush()
+            return record
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def get_latest_drift_check(
+        self,
+        sales_scope: str = "TOTAL_STORE",
+        session: Optional[Session] = None,
+    ) -> Optional[DriftCheckRecord]:
+        """Fetch the most recent drift check evaluation for a given sales scope."""
+        def _execute(s: Session) -> Optional[DriftCheckRecord]:
+            query = (
+                select(DriftCheckRecord)
+                .where(DriftCheckRecord.sales_scope == sales_scope)
+                .order_by(DriftCheckRecord.checked_at.desc())
+                .limit(1)
+            )
+            return s.execute(query).scalar_one_or_none()
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)
+
+    def list_drift_checks(
+        self,
+        sales_scope: Optional[str] = None,
+        limit: int = 50,
+        session: Optional[Session] = None,
+    ) -> List[DriftCheckRecord]:
+        """List historical drift check evaluations ordered by checked_at descending."""
+        def _execute(s: Session) -> List[DriftCheckRecord]:
+            query = select(DriftCheckRecord)
+            if sales_scope:
+                query = query.where(DriftCheckRecord.sales_scope == sales_scope)
+            query = query.order_by(DriftCheckRecord.checked_at.desc()).limit(limit)
+            return list(s.execute(query).scalars().all())
+
+        if session is not None:
+            return _execute(session)
+        with get_db_session(self.engine) as s:
+            return _execute(s)

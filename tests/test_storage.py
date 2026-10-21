@@ -448,3 +448,48 @@ def test_multi_run_corrected_actual_reconciliation(temp_db):
             ActualSalesRecord.sales_scope == "TOTAL_STORE",
         ).count()
         assert actuals_count == 1
+
+
+def test_schema_version_rejection_and_additive_table_safety(temp_db):
+    """Verify additive table data_monitoring_records, idempotency, and future version rejection."""
+    engine = temp_db["engine"]
+
+    # 1. Verify additive table exists
+    with engine.connect() as conn:
+        tables = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';")).scalars().all()
+        assert "data_monitoring_records" in tables
+        current_ver = conn.execute(text("PRAGMA user_version;")).scalar()
+        assert current_ver == SCHEMA_VERSION
+
+    # 2. Repeated init_db is safe and idempotent
+    init_db(engine)
+    with engine.connect() as conn:
+        assert conn.execute(text("PRAGMA user_version;")).scalar() == SCHEMA_VERSION
+
+    # 3. Future schema version rejection
+    with engine.connect() as conn:
+        conn.execute(text("PRAGMA user_version = 99;"))
+        conn.commit()
+
+    with pytest.raises(RuntimeError, match="is newer than the application's supported schema version"):
+        init_db(engine)
+
+
+def test_batch_actuals_storage_and_zero_sales(temp_db):
+    """Verify batch ingestion upsert, reconciliation, and zero sales count in summary stats."""
+    repo = temp_db["repo"]
+
+    # Ingest mix of positive and zero-sales records
+    records = [
+        {"calendar_date": "2026-08-01", "daily_sales": 0.0},
+        {"calendar_date": "2026-08-02", "daily_sales": 120.0},
+        {"calendar_date": "2026-08-03", "daily_sales": 0.0},
+    ]
+    ins, upd, recon = repo.ingest_actual_sales_batch(records, sales_scope="STORE_ZERO_TEST")
+    assert ins == 3
+    assert upd == 0
+
+    stats = repo.get_ingestion_summary_stats(sales_scope="STORE_ZERO_TEST")
+    assert stats["zero_sales_count"] == 2
+    assert stats["latest_observation_date"] == datetime.date(2026, 8, 3)
+
