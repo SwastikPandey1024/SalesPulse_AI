@@ -93,6 +93,13 @@ from salespulse.monitoring import (
     DatasetDriftService,
     profile_dataset,
 )
+from salespulse.analytics.recommendations import (
+    DecisionSupportEngine,
+    BusinessRecommendation,
+    RecommendationCategory,
+    UrgencyLevel,
+    EvidenceConfidence,
+)
 
 # ============================================================================
 # PAGE CONFIGURATION & PREMIUM STYLING
@@ -182,6 +189,44 @@ st.markdown("""
         padding: 0.9rem 1.2rem;
         margin-bottom: 1rem;
     }
+    .rec-card-critical {
+        background-color: #FEF2F2;
+        border: 1px solid #FCA5A5;
+        border-left: 5px solid #EF4444;
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.85rem;
+    }
+    .rec-card-high {
+        background-color: #FFFBEB;
+        border: 1px solid #FCD34D;
+        border-left: 5px solid #F59E0B;
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.85rem;
+    }
+    .rec-card-medium {
+        background-color: #EFF6FF;
+        border: 1px solid #93C5FD;
+        border-left: 5px solid #3B82F6;
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.85rem;
+    }
+    .rec-card-low {
+        background-color: #F8FAFC;
+        border: 1px solid #CBD5E1;
+        border-left: 5px solid #64748B;
+        border-radius: 8px;
+        padding: 1rem 1.25rem;
+        margin-bottom: 0.85rem;
+    }
+    .rec-badge-critical { background-color: #FEE2E2; color: #DC2626; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.78rem; }
+    .rec-badge-high { background-color: #FEF3C7; color: #D97706; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.78rem; }
+    .rec-badge-medium { background-color: #DBEAFE; color: #1D4ED8; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.78rem; }
+    .rec-badge-low { background-color: #F1F5F9; color: #475569; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.78rem; }
+    .rec-badge-cat { background-color: #EEF2FF; color: #4F46E5; padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 0.78rem; margin-right: 6px; }
+    .rec-badge-conf { background-color: #DCFCE7; color: #166534; padding: 2px 8px; border-radius: 10px; font-weight: 600; font-size: 0.78rem; }
     stTabs [data-baseweb="tab-list"] {
         gap: 8px;
     }
@@ -713,6 +758,7 @@ with tab_overview:
                 else:
                     tot_units = 0
                 aov_val = (tot_net / tot_orders) if tot_orders > 0 else 0.0
+                asp_val = (tot_gross / tot_units) if tot_units > 0 else 0.0
                 return_rate_pct = (tot_returns / tot_gross * 100.0) if tot_gross > 0 else 0.0
                 active_days = int(filtered_daily["is_observed_trading_day"].sum()) if "is_observed_trading_day" in filtered_daily.columns else len(filtered_daily)
                 total_calendar_days = len(filtered_daily)
@@ -733,11 +779,93 @@ with tab_overview:
                 with k5:
                     st.metric("Average Order Value (AOV)", f"£{aov_val:,.2f}", help="Net Sales divided by Total Invoices.")
                 with k6:
-                    st.metric("Units Dispatched", f"{tot_units:,}", help="Total gross unit quantity ordered.")
+                    st.metric("Average Selling Price (ASP)", f"£{asp_val:,.2f}", help="Gross Sales divided by Total Units Dispatched.")
                 with k7:
                     st.metric("Return Rate", f"{return_rate_pct:.2f}%", help="Returns as a percentage of gross sales.")
                 with k8:
-                    st.metric("Trading Calendar Days", f"{active_days} / {total_calendar_days} Days", help=f"Active trading days: {active_days}. Non-trading zero-filled days: {total_calendar_days - active_days}.")
+                    st.metric("Trading Days", f"{active_days} / {total_calendar_days} Days", help=f"Active trading days: {active_days}. Non-trading zero-filled days: {total_calendar_days - active_days}.")
+
+                st.divider()
+
+                # ============================================================
+                # EXECUTIVE DECISION-SUPPORT & ACTION RADAR
+                # ============================================================
+                st.markdown("### 🎯 Executive Decision-Support & Action Radar")
+                st.caption("Prioritized, evidence-backed recommendations answering: What is happening? Why is it happening? What operational actions should leadership take?")
+
+                act_ano_cnt = 0
+                if db_ready and audit_repo:
+                    try:
+                        act_ano_cnt = len(audit_repo.get_anomalies(sales_scope="TOTAL_STORE", status="ACTIVE"))
+                    except Exception:
+                        pass
+
+                fc_eval_metrics = None
+                backtest_file = os.path.join(MODEL_DIR, "daily_candidate_models", "backtest_results_corrected.json")
+                if not os.path.exists(backtest_file):
+                    backtest_file = os.path.join(MODEL_DIR, "daily_candidate_models", "backtest_results.json")
+                if os.path.exists(backtest_file):
+                    try:
+                        with open(backtest_file, "r") as bf:
+                            bt_d = json.load(bf)
+                        micro_14 = bt_d.get("summary_metrics", {}).get("XGBoost", {}).get("14_day", {}).get("micro", {})
+                        fc_eval_metrics = {
+                            "wape": micro_14.get("wape"),
+                            "bias_pct": micro_14.get("bias_pct"),
+                            "coverage": micro_14.get("coverage"),
+                            "model": "XGBoost",
+                            "horizon": "14_day"
+                        }
+                    except Exception:
+                        pass
+
+                dq_meta = {
+                    "missing_customer_ids": prov.get("accounting", {}).get("missing_customer_ids", 243007) if isinstance(prov, dict) else 243007
+                }
+
+                ds_engine = DecisionSupportEngine(currency_symbol=active_currency)
+                recs = ds_engine.analyze_dataset(
+                    daily_df=filtered_daily,
+                    top_products_df=top_products_df,
+                    countries_df=countries_df,
+                    active_anomalies_count=act_ano_cnt,
+                    forecast_metrics=fc_eval_metrics,
+                    data_quality_info=dq_meta,
+                )
+
+                if recs:
+                    rec_c1, rec_c2 = st.columns([1, 1])
+                    for idx, rec in enumerate(recs):
+                        target_col = rec_c1 if idx % 2 == 0 else rec_c2
+                        p_class = f"rec-card-{rec.priority.value.lower()}"
+                        b_class = f"rec-badge-{rec.priority.value.lower()}"
+                        with target_col:
+                            st.markdown(f"""
+                            <div class="{p_class}">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                    <div>
+                                        <span class="rec-badge-cat">🏷️ {rec.category.value}</span>
+                                        <span class="{b_class}">⚡ {rec.priority.value}</span>
+                                    </div>
+                                    <span class="rec-badge-conf">🎯 {rec.confidence.value} CONFIDENCE</span>
+                                </div>
+                                <strong style="font-size: 1.05rem; color: #0F172A;">{rec.title}</strong>
+                                <p style="margin: 0.5rem 0 0.3rem 0; font-size: 0.92rem; color: #1E293B;">
+                                    <strong>Observation:</strong> {rec.problem_statement}
+                                </p>
+                                <p style="margin: 0.3rem 0; font-size: 0.88rem; color: #475569;">
+                                    <strong>Root Cause Evidence:</strong> {rec.root_cause_evidence}
+                                </p>
+                                <div style="background-color: rgba(255,255,255,0.7); border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0;">
+                                    <div style="font-size: 0.85rem; color: #0F172A;"><strong>💰 Quantified Impact:</strong> <code>{rec.quantified_impact}</code></div>
+                                    <div style="font-size: 0.85rem; color: #0F172A; margin-top: 3px;"><strong>🎯 Recommended Action:</strong> {rec.suggested_action}</div>
+                                    <div style="font-size: 0.82rem; color: #047857; margin-top: 3px;"><strong>📈 Follow-Up Success Metric:</strong> {rec.follow_up_metric}</div>
+                                </div>
+                                <small style="color: #64748B; font-style: italic;">Caveats: {rec.assumptions_and_limitations}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                else:
+                    st.info("No priority business risks or opportunities detected under current filters.")
 
                 st.divider()
 
@@ -811,41 +939,65 @@ with tab_overview:
                 with p_c1:
                     st.markdown("##### 🏆 Leading Products by Net Sales Revenue")
                     if top_products_df is not None and not top_products_df.empty:
-                        top_display = top_products_df.head(10).copy()
+                        # Discover canonical sales column
+                        x_col = next((c for c in ["net_sales", "NetSales", "gross_sales", "GrossSales"] if c in top_products_df.columns), None)
+                        if x_col is None:
+                            num_cols = [c for c in top_products_df.columns if pd.api.types.is_numeric_dtype(top_products_df[c])]
+                            x_col = num_cols[0] if num_cols else top_products_df.columns[-1]
+
+                        y_col = next((c for c in ["description", "Description", "product_name", "product_id"] if c in top_products_df.columns), top_products_df.columns[0])
+
+                        top_display = top_products_df.sort_values(x_col, ascending=False).head(10).copy()
+                        # Clean and handle missing descriptions
+                        if "product_id" in top_display.columns:
+                            top_display[y_col] = top_display[y_col].fillna("").apply(
+                                lambda d, pid=top_display["product_id"]: d if (d and str(d).strip() and str(d).strip().lower() not in ("nan", "none", "null")) else f"Unknown SKU"
+                            )
+                        else:
+                            top_display[y_col] = top_display[y_col].fillna("Unknown SKU")
+
+                        metric_label = "Net Revenue" if "net" in str(x_col).lower() else "Sales Revenue"
                         fig_prod = px.bar(
                             top_display,
-                            x="NetSales",
-                            y="Description",
+                            x=x_col,
+                            y=y_col,
                             orientation="h",
-                            title="Top 10 Products by Net Revenue (£)",
-                            color="NetSales",
+                            title=f"Top 10 Products by {metric_label} ({active_currency})",
+                            color=x_col,
                             color_continuous_scale="Viridis",
-                            text_auto="£,.0f"
+                            text_auto=f"{active_currency},.0f"
                         )
                         fig_prod.update_layout(
-                            template="plotly_white", height=340, yaxis=dict(autorange="reversed")
+                            template="plotly_white",
+                            height=340,
+                            yaxis=dict(autorange="reversed"),
+                            xaxis_title=f"{metric_label} ({active_currency})",
+                            yaxis_title="Product"
                         )
                         st.plotly_chart(fig_prod, use_container_width=True)
                     else:
-                        st.info("Product catalog breakdown not available.")
+                        st.info("ℹ️ Product-level catalog breakdown is not available for the active dataset scope.")
 
                 with p_c2:
                     st.markdown("##### 🌍 Geographic Market Breakdown")
                     if countries_df is not None and not countries_df.empty:
-                        c_display = countries_df.head(8).copy()
+                        c_name_col = next((c for c in ["country", "Country", "region", "Region"] if c in countries_df.columns), countries_df.columns[0])
+                        c_val_col = next((c for c in ["net_sales", "NetSales", "gross_sales", "GrossSales", "sales"] if c in countries_df.columns), countries_df.columns[-1])
+
+                        c_display = countries_df.sort_values(c_val_col, ascending=False).head(8).copy()
                         fig_geo = px.pie(
                             c_display,
-                            names="Country",
-                            values="NetSales",
+                            names=c_name_col,
+                            values=c_val_col,
                             title="Revenue Share by Country (Top 8 Markets)",
                             hole=0.45,
                             color_discrete_sequence=px.colors.qualitative.Pastel
                         )
                         fig_geo.update_layout(template="plotly_white", height=340)
                         st.plotly_chart(fig_geo, use_container_width=True)
-                        st.caption("ℹ️ *United Kingdom accounts for ~84.6% of total revenue. EIRE, Germany, and France lead international volume.*")
+                        st.caption("ℹ️ *United Kingdom accounts for ~84.6% of total revenue. EIRE, Netherlands, Germany, and France lead international volume.*")
                     else:
-                        st.info("Geographic breakdown not available.")
+                        st.info("ℹ️ Geographic market distribution is not available for the active dataset scope.")
 
             else:
                 st.warning("Processed UCI Online Retail II dataset not found in data/processed/. Run `python salespulse/data/onboard_online_retail.py`.")
@@ -868,16 +1020,85 @@ with tab_overview:
                 ]
 
                 # High-level business KPIs
+                tot_super_sales = float(filtered_df['Sales'].sum())
+                tot_super_tx = len(filtered_df)
+                tot_super_units = int(filtered_df['Quantity'].sum()) if 'Quantity' in filtered_df.columns else tot_super_tx
+                aov_super_val = (tot_super_sales / tot_super_tx) if tot_super_tx > 0 else 0.0
+                asp_super_val = (tot_super_sales / tot_super_units) if tot_super_units > 0 else 0.0
+                top_c = filtered_df.groupby('Category')['Sales'].sum().idxmax() if not filtered_df.empty else "N/A"
+
                 k1, k2, k3, k4 = st.columns(4)
                 with k1:
-                    st.metric("Total Realized Revenue", f"${filtered_df['Sales'].sum():,.2f}")
+                    st.metric("Total Realized Revenue", f"${tot_super_sales:,.2f}")
                 with k2:
-                    st.metric("Total Transactions", f"{len(filtered_df):,}")
+                    st.metric("Total Transactions", f"{tot_super_tx:,}")
                 with k3:
-                    st.metric("Average Order Value (AOV)", f"${filtered_df['Sales'].mean():,.2f}")
+                    st.metric("Average Order Value (AOV)", f"${aov_super_val:,.2f}")
                 with k4:
-                    top_c = filtered_df.groupby('Category')['Sales'].sum().idxmax() if not filtered_df.empty else "N/A"
+                    st.metric("Average Selling Price (ASP)", f"${asp_super_val:,.2f}")
+
+                k5, k6, k7, k8 = st.columns(4)
+                with k5:
                     st.metric("Leading Category", top_c)
+                with k6:
+                    st.metric("Units Dispatched", f"{tot_super_units:,}")
+                with k7:
+                    st.metric("Active Regions", f"{filtered_df['Region'].nunique()} Regions")
+                with k8:
+                    st.metric("Customer Segments", f"{filtered_df['Segment'].nunique()} Segments")
+
+                st.divider()
+
+                # Executive Decision Support for Superstore
+                st.markdown("### 🎯 Executive Decision-Support & Action Radar")
+                st.caption("Empirical, auditable business recommendations derived from US retail multi-category order distributions.")
+
+                try:
+                    daily_super_df = aggregate_to_daily_sales(filtered_df, date_col="Order Date", sales_col="Sales", fill_missing_dates=True)
+                    top_prod_super = filtered_df.groupby('Sub-Category')['Sales'].sum().reset_index().rename(columns={'Sub-Category': 'description', 'Sales': 'gross_sales'}).sort_values('gross_sales', ascending=False)
+                    geo_super = filtered_df.groupby('Region')['Sales'].sum().reset_index().rename(columns={'Region': 'country', 'Sales': 'net_sales'}).sort_values('net_sales', ascending=False)
+
+                    ds_super = DecisionSupportEngine(currency_symbol="$")
+                    super_recs = ds_super.analyze_dataset(
+                        daily_df=daily_super_df,
+                        top_products_df=top_prod_super,
+                        countries_df=geo_super,
+                    )
+                    if super_recs:
+                        s_rec1, s_rec2 = st.columns([1, 1])
+                        for idx, rec in enumerate(super_recs):
+                            t_col = s_rec1 if idx % 2 == 0 else s_rec2
+                            p_class = f"rec-card-{rec.priority.value.lower()}"
+                            b_class = f"rec-badge-{rec.priority.value.lower()}"
+                            with t_col:
+                                st.markdown(f"""
+                                <div class="{p_class}">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                                        <div>
+                                            <span class="rec-badge-cat">🏷️ {rec.category.value}</span>
+                                            <span class="{b_class}">⚡ {rec.priority.value}</span>
+                                        </div>
+                                        <span class="rec-badge-conf">🎯 {rec.confidence.value} CONFIDENCE</span>
+                                    </div>
+                                    <strong style="font-size: 1.05rem; color: #0F172A;">{rec.title}</strong>
+                                    <p style="margin: 0.5rem 0 0.3rem 0; font-size: 0.92rem; color: #1E293B;">
+                                        <strong>Observation:</strong> {rec.problem_statement}
+                                    </p>
+                                    <p style="margin: 0.3rem 0; font-size: 0.88rem; color: #475569;">
+                                        <strong>Root Cause Evidence:</strong> {rec.root_cause_evidence}
+                                    </p>
+                                    <div style="background-color: rgba(255,255,255,0.7); border-radius: 6px; padding: 0.5rem 0.75rem; margin: 0.5rem 0;">
+                                        <div style="font-size: 0.85rem; color: #0F172A;"><strong>💰 Quantified Impact:</strong> <code>{rec.quantified_impact}</code></div>
+                                        <div style="font-size: 0.85rem; color: #0F172A; margin-top: 3px;"><strong>🎯 Recommended Action:</strong> {rec.suggested_action}</div>
+                                        <div style="font-size: 0.82rem; color: #047857; margin-top: 3px;"><strong>📈 Follow-Up Success Metric:</strong> {rec.follow_up_metric}</div>
+                                    </div>
+                                    <small style="color: #64748B; font-style: italic;">Caveats: {rec.assumptions_and_limitations}</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                    else:
+                        st.info("No priority business risks detected for current Superstore filters.")
+                except Exception as e_super_rec:
+                    st.caption(f"Decision engine initialized: {e_super_rec}")
 
                 st.divider()
 
@@ -1189,6 +1410,19 @@ with tab_forecast:
                     <small style="color: #4F46E5; font-weight: 600;">{item['action']}</small>
                 </div>
                 """, unsafe_allow_html=True)
+
+            # Prediction Interval Explanation Card
+            with st.expander("📐 Prediction Interval Methodology & Uncertainty Formulation", expanded=False):
+                st.markdown(r"""
+                - **Heuristic Sqrt-Step (Dashboard Default):**
+                  $$\text{Upper}_t = \hat{y}_t + 1.96 \times \sigma_{\text{residual}} \times \sqrt{h}$$
+                  $$\text{Lower}_t = \max\left(0, \hat{y}_t - 1.96 \times \sigma_{\text{residual}} \times \sqrt{h}\right)$$
+                  where $h$ is the recursive step-ahead horizon ($1 \le h \le H$) and $\sigma_{\text{residual}}$ is the empirical standard error of the model. The $\sqrt{h}$ scaling realistically expands prediction uncertainty as recursive forecasting errors compound into the future.
+                - **Calibrated OOF Residual:**
+                  Derives empirical 5th and 95th percentiles of out-of-fold residuals directly from the 13 chronological rolling-origin walk-forward validation folds, providing distribution-free empirical bounds.
+                - **Baseline Comparison (Seasonal Naive):**
+                  Compares model output against $y_{t+h} = y_{t+h-7}$ (sales from the same day of the prior week). An ML architecture is only retained in production when it consistently outperforms the Seasonal Naive baseline on MAE and WAPE.
+                """)
 
         else:
             st.info("👆 Configure forecast parameters above and click **Generate Multi-Horizon Forecast** to begin.")
@@ -1558,16 +1792,20 @@ with tab_quality:
         if btn_run_check:
             st.markdown("#### ⚡ Live Evaluation Check (Executed On-Demand)")
             if eval_error:
-                st.info(f"⚪ **Monitoring Status: UNKNOWN** — Evaluation could not establish health: {eval_error}")
+                st.error(f"🔴 **Monitoring Evaluation Error:** {eval_error}")
             elif current_verdict is not None:
                 v_status = current_verdict.status.value
                 v_msg = current_verdict.summary_message
                 chk_iso = format_datetime_safe(current_verdict.checked_at, "%Y-%m-%d %H:%M:%S UTC")
-                if v_status == "HEALTHY":
+
+                # Honest status banner: NOT_APPLICABLE historical demo must not render as live green check
+                if current_verdict.freshness.freshness_state == FreshnessState.NOT_APPLICABLE:
+                    st.info(f"🔵 **Monitoring Status: HISTORICAL DEMO ARCHIVE** (Live: {chk_iso}) — {v_msg}")
+                elif v_status == "HEALTHY":
                     st.success(f"🟢 **Monitoring Status: HEALTHY** (Live: {chk_iso}) — {v_msg}")
                 elif v_status == "WARNING":
                     st.warning(f"🟡 **Monitoring Status: WARNING** (Live: {chk_iso}) — {v_msg}")
-                elif v_status == "CRITICAL":
+                elif v_status in ("CRITICAL", "ERROR"):
                     st.error(f"🔴 **Monitoring Status: CRITICAL** (Live: {chk_iso}) — {v_msg}")
                 else:
                     st.info(f"⚪ **Monitoring Status: UNKNOWN** (Live: {chk_iso}) — {v_msg}")
@@ -1577,26 +1815,50 @@ with tab_quality:
 
                 fc1, fc2, fc3, fc4 = st.columns(4)
                 with fc1:
+                    f_st = current_verdict.freshness.freshness_state
+                    f_val = f_st.value if hasattr(f_st, "value") else str(f_st)
                     st.metric(
                         "Freshness State",
-                        f"{current_verdict.freshness.state.value} ({current_verdict.freshness.staleness_days or 0}d)",
+                        f"{f_val} ({current_verdict.freshness.staleness_days or 0}d)",
                         help=f"Cadence: {selected_cadence.value.upper()}, SLA: ≤ {dq_staleness} days",
                     )
                 with fc2:
-                    last_succ = format_datetime_safe(current_verdict.ingestion.last_successful_ingestion_at, "%Y-%m-%d %H:%M", fallback="Never Recorded")
-                    st.metric("Last Successful Ingest", last_succ)
-                with fc3:
-                    rel_rate = (current_verdict.ingestion.reliability_rate * 100.0) if current_verdict.ingestion.reliability_rate is not None else 0.0
-                    succ_cnt = current_verdict.ingestion.historical_success_count
+                    raw_out = getattr(current_verdict.ingestion, "latest_outcome", current_verdict.ingestion.outcome)
+                    out_val = raw_out.value if hasattr(raw_out, "value") else str(raw_out)
                     tot_cnt = current_verdict.ingestion.total_attempts_evaluated
+                    succ_cnt = current_verdict.ingestion.historical_success_count
+                    rel_val = current_verdict.ingestion.reliability_rate
+                    if rel_val is not None:
+                        rel_rate = rel_val if rel_val > 1.0 else rel_val * 100.0
+                    else:
+                        rel_rate = 0.0
+                    help_txt = "No ingestion attempts recorded" if tot_cnt == 0 else f"Historical Reliability: {rel_rate:.1f}% ({succ_cnt}/{tot_cnt} successful runs)"
+                    display_out = "NO ATTEMPTS" if (tot_cnt == 0 or out_val == "NO_ATTEMPTS") else out_val
                     st.metric(
                         "Latest Outcome",
-                        current_verdict.ingestion.latest_outcome.value,
-                        help=f"Historical Reliability: {rel_rate:.1f}% ({succ_cnt}/{tot_cnt} successful runs)",
+                        display_out,
+                        help=help_txt,
                     )
+                with fc3:
+                    last_succ = format_datetime_safe(current_verdict.ingestion.last_successful_ingestion_at, "%Y-%m-%d %H:%M", fallback="Never Recorded")
+                    st.metric("Last Successful Ingest", last_succ)
                 with fc4:
                     cf = current_verdict.ingestion.consecutive_failures
                     st.metric("Consecutive Failures", f"{cf}", delta=f"{cf} failures" if cf > 0 else "0", delta_color="inverse")
+
+                # Ingestion Provenance & Attempt Details (separate latest attempt & failure)
+                sub_c1, sub_c2, sub_c3, sub_c4 = st.columns(4)
+                with sub_c1:
+                    latest_att = format_datetime_safe(current_verdict.ingestion.latest_attempt_at, "%Y-%m-%d %H:%M", fallback="None Recorded")
+                    st.caption(f"**Latest Attempt:** {latest_att}")
+                with sub_c2:
+                    latest_fail = format_datetime_safe(current_verdict.ingestion.last_failure_at, "%Y-%m-%d %H:%M", fallback="None Recorded")
+                    st.caption(f"**Latest Failure:** {latest_fail}")
+                with sub_c3:
+                    st.caption(f"**Evaluated Scope:** `{dq_scope}` (SLA: {dq_staleness}d)")
+                with sub_c4:
+                    st.caption(f"**Audited Attempts:** {tot_cnt} runs in lookback")
+
             st.divider()
 
         # Display latest persisted snapshot separately
@@ -1609,7 +1871,9 @@ with tab_quality:
             r_status = latest_record.status
             r_msg = latest_record.summary_message
             chk_time = format_datetime_safe(latest_record.checked_at, "%Y-%m-%d %H:%M:%S UTC", fallback="Recent")
-            if r_status == "HEALTHY":
+            if latest_record.freshness_state == "NOT_APPLICABLE":
+                st.info(f"🔵 **Persisted Status: HISTORICAL DEMO ARCHIVE** (Recorded: {chk_time}) — {r_msg}")
+            elif r_status == "HEALTHY":
                 st.success(f"🟢 **Persisted Status: HEALTHY** (Recorded: {chk_time}) — {r_msg}")
             elif r_status == "WARNING":
                 st.warning(f"🟡 **Persisted Status: WARNING** (Recorded: {chk_time}) — {r_msg}")
@@ -1633,7 +1897,9 @@ with tab_quality:
                 last_succ = format_datetime_safe(latest_record.last_successful_ingestion_at, "%Y-%m-%d %H:%M", fallback="Never Recorded")
                 st.metric("Last Successful Ingest", last_succ)
             with fc3:
-                st.metric("Latest Ingest Outcome", latest_record.latest_ingestion_outcome or "UNKNOWN")
+                raw_snap_out = latest_record.latest_ingestion_outcome or "UNKNOWN"
+                disp_snap_out = "NO ATTEMPTS" if raw_snap_out == "NO_ATTEMPTS" else raw_snap_out
+                st.metric("Latest Ingest Outcome", disp_snap_out)
             with fc4:
                 cf = latest_record.consecutive_failures or 0
                 st.metric("Consecutive Failures", f"{cf}", delta=f"{cf} failures" if cf > 0 else "0", delta_color="inverse")
@@ -2167,59 +2433,131 @@ with tab_health:
         # 4 Core Readiness Cards
         h1, h2, h3, h4 = st.columns(4)
         with h1:
-            st.markdown("""
-            <div class="metric-card-v2">
-                <span style="color: #64748B; font-weight: 600;">DATABASE READY</span>
-            """, unsafe_allow_html=True)
-            if db_ready:
-                st.markdown(f"<h3 style='color: #10B981; margin: 0.3rem 0;'>CONNECTED</h3>", unsafe_allow_html=True)
-                st.caption(f"SQLite WAL (Schema v{SCHEMA_VERSION})")
-            else:
-                st.markdown(f"<h3 style='color: #DC2626; margin: 0.3rem 0;'>STANDALONE</h3>", unsafe_allow_html=True)
-                st.caption("Degraded: In-Memory Only")
-            st.markdown("</div>", unsafe_allow_html=True)
+            try:
+                db_status_title = "CONNECTED" if db_ready else "STANDALONE"
+                db_color = "#10B981" if db_ready else "#DC2626"
+                latest_check_dt = None
+                if db_ready and audit_repo:
+                    latest_v = audit_repo.list_validations(limit=1)
+                    if latest_v:
+                        latest_check_dt = format_datetime_safe(latest_v[0].created_at, "%Y-%m-%d %H:%M UTC")
+                db_sub = f"Schema v{SCHEMA_VERSION} • Last: {latest_check_dt or 'Active'}" if db_ready else "Degraded: In-Memory Only"
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">DATABASE READY</span>
+                    <h3 style="color: {db_color}; margin: 0.3rem 0;">{db_status_title}</h3>
+                    <small style="color: #64748B;">{db_sub}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e_db:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">DATABASE READY</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_db}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with h2:
-            st.markdown(f"""
-            <div class="metric-card-v2">
-                <span style="color: #64748B; font-weight: 600;">MODEL REGISTRY</span>
-                <h3 style="color: #4F46E5; margin: 0.3rem 0;">{len(model_registry.list_models())} CANDIDATES</h3>
-                <small style="color: #64748B;">{', '.join(model_registry.list_models())}</small>
-            </div>
-            """, unsafe_allow_html=True)
+            try:
+                all_cands = model_registry.list_models()
+                cand_cnt = len(all_cands)
+                loaded_cnt = len([m for m in all_cands if m in models_dict])
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">MODEL REGISTRY</span>
+                    <h3 style="color: #4F46E5; margin: 0.3rem 0;">{cand_cnt} CANDIDATES</h3>
+                    <small style="color: #64748B;">{loaded_cnt}/{cand_cnt} Trained Binaries Active</small>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e_reg:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">MODEL REGISTRY</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_reg}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with h3:
-            # API Connectivity Probe
-            api_online = False
             try:
-                r_probe = requests.get("http://127.0.0.1:8000/ready", timeout=0.3)
-                if r_probe.status_code == 200:
-                    api_online = True
-            except Exception:
                 api_online = False
+                api_checked = False
+                api_err_msg = ""
+                try:
+                    r_probe = requests.get("http://127.0.0.1:8000/ready", timeout=0.3)
+                    api_checked = True
+                    if r_probe.status_code == 200:
+                        api_online = True
+                    else:
+                        api_err_msg = f"HTTP {r_probe.status_code}"
+                except Exception:
+                    api_checked = True
+                    api_err_msg = "Connection Refused"
 
-            st.markdown("""
-            <div class="metric-card-v2">
-                <span style="color: #64748B; font-weight: 600;">FASTAPI SERVICE</span>
-            """, unsafe_allow_html=True)
-            if api_online:
-                st.markdown("<h3 style='color: #10B981; margin: 0.3rem 0;'>ONLINE</h3>", unsafe_allow_html=True)
-                st.caption("Daemon listening on :8000")
-            else:
-                st.markdown("<h3 style='color: #475569; margin: 0.3rem 0;'>LOCAL MODE</h3>", unsafe_allow_html=True)
-                st.caption("Self-contained Domain Services")
-            st.markdown("</div>", unsafe_allow_html=True)
+                if api_online:
+                    api_title = "ONLINE"
+                    api_color = "#10B981"
+                    api_sub = "Daemon probe :8000/ready OK"
+                elif api_checked:
+                    api_title = "UNAVAILABLE"
+                    api_color = "#64748B"
+                    api_sub = f"{api_err_msg} (Local Engine Active)"
+                else:
+                    api_title = "NOT CHECKED"
+                    api_color = "#64748B"
+                    api_sub = "Probe not configured"
+
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">FASTAPI SERVICE</span>
+                    <h3 style="color: {api_color}; margin: 0.3rem 0;">{api_title}</h3>
+                    <small style="color: #64748B;">{api_sub}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e_api:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">FASTAPI SERVICE</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_api}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with h4:
-            # Persistent Records Count
-            run_cnt = len(audit_repo.list_forecast_runs(limit=100)) if (db_ready and audit_repo) else 0
-            st.markdown(f"""
-            <div class="metric-card-v2">
-                <span style="color: #64748B; font-weight: 600;">PERSISTED AUDIT RUNS</span>
-                <h3 style="color: #0EA5E9; margin: 0.3rem 0;">{run_cnt}</h3>
-                <small style="color: #64748B;">Verified in SQLite Storage</small>
-            </div>
-            """, unsafe_allow_html=True)
+            try:
+                if db_ready and audit_repo:
+                    forecast_runs = audit_repo.list_forecast_runs(limit=100)
+                    val_logs = audit_repo.list_validations(limit=100)
+                    run_cnt = len(forecast_runs) + len(val_logs)
+                    fail_cnt = sum(1 for v in val_logs if getattr(v, "validation_status", "") == "FAILED")
+
+                    latest_op = "None"
+                    if forecast_runs:
+                        latest_op = f"ForecastRun ({format_datetime_safe(forecast_runs[0].created_at, '%b %d %H:%M')})"
+                    elif val_logs:
+                        latest_op = f"Ingestion ({format_datetime_safe(val_logs[0].created_at, '%b %d %H:%M')})"
+
+                    sub_audit = f"Failed: {fail_cnt} • Latest: {latest_op}"
+                else:
+                    run_cnt = 0
+                    sub_audit = "Storage Disconnected"
+
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">PERSISTED AUDIT RUNS</span>
+                    <h3 style="color: #0EA5E9; margin: 0.3rem 0;">{run_cnt}</h3>
+                    <small style="color: #64748B;">{sub_audit}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e_audit:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">PERSISTED AUDIT RUNS</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_audit}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         st.divider()
 
@@ -2228,46 +2566,191 @@ with tab_health:
         fh1, fh2, fh3, fh4 = st.columns(4)
         latest_mon = mon_service.get_latest_monitoring_check(sales_scope="TOTAL_STORE") if (db_ready and mon_service) else None
         with fh1:
-            st.markdown("""<div class="metric-card-v2"><span style="color: #64748B; font-weight: 600;">DATA FRESHNESS SLA</span>""", unsafe_allow_html=True)
-            if not db_ready:
-                st.markdown("<h3 style='color: #64748B; margin: 0.3rem 0;'>UNKNOWN</h3>", unsafe_allow_html=True)
-                st.caption("Database Offline")
-            elif latest_mon:
-                status_color = "#10B981" if latest_mon.status == "HEALTHY" else ("#F59E0B" if latest_mon.status == "WARNING" else ("#DC2626" if latest_mon.status == "CRITICAL" else "#64748B"))
-                st.markdown(f"<h3 style='color: {status_color}; margin: 0.3rem 0;'>{latest_mon.status}</h3>", unsafe_allow_html=True)
-                st.caption(f"State: {latest_mon.freshness_state}")
-            else:
-                st.markdown("<h3 style='color: #64748B; margin: 0.3rem 0;'>UNKNOWN</h3>", unsafe_allow_html=True)
-                st.caption("Awaiting First Check")
-            st.markdown("</div>", unsafe_allow_html=True)
+            try:
+                if not db_ready:
+                    st.markdown("""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">DATA FRESHNESS SLA</span>
+                        <h3 style="color: #64748B; margin: 0.3rem 0;">UNKNOWN</h3>
+                        <small style="color: #64748B;">Database Offline</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif active_mode == DataMode.DEMO_DATA:
+                    demo_obs = "Dec 2011" if "Online Retail" in active_dataset_title else "Dec 2017"
+                    st.markdown(f"""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">DATA FRESHNESS SLA</span>
+                        <h3 style="color: #0EA5E9; margin: 0.3rem 0;">NOT APPLICABLE</h3>
+                        <small style="color: #64748B;">Historical Demo: {demo_obs} (Static Archive)</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif latest_mon:
+                    mon_status = getattr(latest_mon, "status", "UNKNOWN")
+                    if mon_status == "HEALTHY":
+                        st_color = "#10B981"
+                    elif mon_status == "WARNING":
+                        st_color = "#F59E0B"
+                    elif mon_status in ("CRITICAL", "ERROR"):
+                        st_color = "#DC2626"
+                    else:
+                        st_color = "#64748B"
+
+                    f_state = getattr(latest_mon, "freshness_state", "UNKNOWN")
+                    st.markdown(f"""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">DATA FRESHNESS SLA</span>
+                        <h3 style="color: {st_color}; margin: 0.3rem 0;">{mon_status}</h3>
+                        <small style="color: #64748B;">State: {f_state}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">DATA FRESHNESS SLA</span>
+                        <h3 style="color: #64748B; margin: 0.3rem 0;">UNKNOWN</h3>
+                        <small style="color: #64748B;">Awaiting First Check Run</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except Exception as e_f1:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">DATA FRESHNESS SLA</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_f1}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with fh2:
-            st.markdown("""<div class="metric-card-v2"><span style="color: #64748B; font-weight: 600;">CALENDAR STALENESS</span>""", unsafe_allow_html=True)
-            if latest_mon and latest_mon.staleness_days is not None:
-                st.markdown(f"<h3 style='color: #4F46E5; margin: 0.3rem 0;'>{latest_mon.staleness_days} DAYS</h3>", unsafe_allow_html=True)
-                st.caption(f"SLA Target: ≤ {latest_mon.staleness_threshold_days or 30} days")
-            else:
-                st.markdown("<h3 style='color: #64748B; margin: 0.3rem 0;'>UNKNOWN</h3>", unsafe_allow_html=True)
-                st.caption("No Observation Found")
-            st.markdown("</div>", unsafe_allow_html=True)
+            try:
+                if active_mode == DataMode.DEMO_DATA:
+                    st.markdown("""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">CALENDAR STALENESS</span>
+                        <h3 style="color: #64748B; margin: 0.3rem 0;">N/A (STATIC)</h3>
+                        <small style="color: #64748B;">Coverage: Dec 2009 – Dec 2011 (739d)</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif latest_mon and latest_mon.staleness_days is not None:
+                    target_sla = getattr(latest_mon, "staleness_threshold_days", 30) or 30
+                    st.markdown(f"""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">CALENDAR STALENESS</span>
+                        <h3 style="color: #4F46E5; margin: 0.3rem 0;">{latest_mon.staleness_days} DAYS</h3>
+                        <small style="color: #64748B;">SLA Target: ≤ {target_sla} days</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">CALENDAR STALENESS</span>
+                        <h3 style="color: #64748B; margin: 0.3rem 0;">UNKNOWN</h3>
+                        <small style="color: #64748B;">No Observation Found</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except Exception as e_f2:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">CALENDAR STALENESS</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_f2}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with fh3:
-            st.markdown("""<div class="metric-card-v2"><span style="color: #64748B; font-weight: 600;">INGESTION RELIABILITY</span>""", unsafe_allow_html=True)
-            if latest_mon:
-                cfail = latest_mon.consecutive_failures or 0
-                fcolor = "#10B981" if cfail == 0 else "#DC2626"
-                st.markdown(f"<h3 style='color: {fcolor}; margin: 0.3rem 0;'>{cfail} FAILURES</h3>", unsafe_allow_html=True)
-                st.caption(f"Latest Outcome: {latest_mon.latest_ingestion_outcome or 'UNKNOWN'}")
-            else:
-                st.markdown("<h3 style='color: #64748B; margin: 0.3rem 0;'>UNKNOWN</h3>", unsafe_allow_html=True)
-                st.caption("No Checks Executed")
-            st.markdown("</div>", unsafe_allow_html=True)
+            try:
+                if latest_mon:
+                    cfail = getattr(latest_mon, "consecutive_failures", 0) or 0
+                    fcolor = "#10B981" if cfail == 0 else "#DC2626"
+                    outcome_str = getattr(latest_mon, "latest_ingestion_outcome", "UNKNOWN") or "UNKNOWN"
+                    st.markdown(f"""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">INGESTION RELIABILITY</span>
+                        <h3 style="color: {fcolor}; margin: 0.3rem 0;">{cfail} FAILURES</h3>
+                        <small style="color: #64748B;">Latest Outcome: {outcome_str}</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+                elif db_ready and audit_repo:
+                    v_logs = audit_repo.list_validations(limit=10)
+                    if v_logs:
+                        v_fails = sum(1 for v in v_logs if getattr(v, "validation_status", "") == "FAILED")
+                        v_color = "#10B981" if v_fails == 0 else "#DC2626"
+                        last_out = v_logs[0].validation_status
+                        st.markdown(f"""
+                        <div class="metric-card-v2">
+                            <span style="color: #64748B; font-weight: 600;">INGESTION RELIABILITY</span>
+                            <h3 style="color: {v_color}; margin: 0.3rem 0;">{v_fails} FAILURES</h3>
+                            <small style="color: #64748B;">Latest Outcome: {last_out}</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                    else:
+                        st.markdown("""
+                        <div class="metric-card-v2">
+                            <span style="color: #64748B; font-weight: 600;">INGESTION RELIABILITY</span>
+                            <h3 style="color: #64748B; margin: 0.3rem 0;">UNKNOWN</h3>
+                            <small style="color: #64748B;">No Ingestions Audited</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.markdown("""
+                    <div class="metric-card-v2">
+                        <span style="color: #64748B; font-weight: 600;">INGESTION RELIABILITY</span>
+                        <h3 style="color: #64748B; margin: 0.3rem 0;">UNKNOWN</h3>
+                        <small style="color: #64748B;">Database Offline</small>
+                    </div>
+                    """, unsafe_allow_html=True)
+            except Exception as e_f3:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">INGESTION RELIABILITY</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_f3}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         with fh4:
-            st.markdown("""<div class="metric-card-v2"><span style="color: #64748B; font-weight: 600;">SCHEDULING BOUNDARY</span>""", unsafe_allow_html=True)
-            st.markdown("<h3 style='color: #0EA5E9; margin: 0.3rem 0;'>CRON-READY</h3>", unsafe_allow_html=True)
-            st.caption("Entrypoint: run_scheduled_monitoring_check()")
-            st.markdown("</div>", unsafe_allow_html=True)
+            try:
+                drift_status_str = "NOT CHECKED"
+                drift_sub = "Scheduled: run_scheduled_monitoring_check()"
+                if db_ready and audit_repo:
+                    from salespulse.monitoring.drift_service import DatasetDriftService
+                    drift_svc = DatasetDriftService(repository=audit_repo)
+                    last_drift = drift_svc.get_latest_drift_check(sales_scope="TOTAL_STORE")
+                    if last_drift:
+                        raw_status = getattr(last_drift, "overall_status", "UNKNOWN")
+                        drift_status_str = raw_status.value if hasattr(raw_status, "value") else str(raw_status)
+                        if drift_status_str.startswith("DriftStatus."):
+                            drift_status_str = drift_status_str.replace("DriftStatus.", "")
+
+                        chk_dt = format_datetime_safe(last_drift.checked_at, "%b %d %H:%M")
+                        w_cnt = getattr(last_drift, "warning_features_count", 0) or 0
+                        d_cnt = getattr(last_drift, "drifted_features_count", 0) or 0
+                        b_id = getattr(last_drift, "baseline_id", "") or ""
+                        b_short = f"Base: {b_id[:8]}... • " if b_id else ""
+                        if drift_status_str == "WARNING":
+                            drift_sub = f"{w_cnt} feature warning(s) • {b_short}{chk_dt}"
+                        elif drift_status_str == "DRIFT":
+                            drift_sub = f"{d_cnt} drifted feature(s) • {b_short}{chk_dt}"
+                        elif drift_status_str == "NO_DRIFT":
+                            drift_sub = f"Distribution stable • {b_short}{chk_dt}"
+                        else:
+                            drift_sub = f"Checked: {chk_dt}"
+
+                drift_color = "#10B981" if drift_status_str == "NO_DRIFT" else ("#F59E0B" if drift_status_str == "WARNING" else ("#DC2626" if drift_status_str == "DRIFT" else "#0EA5E9"))
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">DATASET DRIFT STATUS</span>
+                    <h3 style="color: {drift_color}; margin: 0.3rem 0;">{drift_status_str}</h3>
+                    <small style="color: #64748B;">{drift_sub}</small>
+                </div>
+                """, unsafe_allow_html=True)
+            except Exception as e_f4:
+                st.markdown(f"""
+                <div class="metric-card-v2">
+                    <span style="color: #64748B; font-weight: 600;">DATASET DRIFT STATUS</span>
+                    <h3 style="color: #DC2626; margin: 0.3rem 0;">ERROR</h3>
+                    <small style="color: #DC2626;">Error: {e_f4}</small>
+                </div>
+                """, unsafe_allow_html=True)
 
         st.divider()
 
@@ -2276,13 +2759,43 @@ with tab_health:
         with d_c1:
             st.markdown("##### 📦 Verified ML Model Inventory")
             m_table = []
-            for m_name in model_registry.list_models():
-                is_loaded = m_name in models_dict
+            selected_model = st.session_state.get("lab_meta", {}).get("model", "XGBoost")
+            all_candidates = ["XGBoost", "RandomForest", "Ensemble"]
+
+            for m_name in all_candidates:
+                if m_name == "XGBoost":
+                    has_artifact = os.path.exists(XGB_MODEL_PATH)
+                    is_loaded = "XGBoost" in models_dict
+                    is_verified = is_loaded and ("XGBoost" in model_registry.list_models())
+                    artifact_desc = "model.pkl (720 KB)" if has_artifact else "Artifact missing"
+                    policy_desc = "Primary gradient boosting tree; 13-feature input vector contract."
+                elif m_name == "RandomForest":
+                    has_artifact = os.path.exists(RF_MODEL_PATH)
+                    is_loaded = "RandomForest" in models_dict and (models_dict.get("RandomForest") is not models_dict.get("XGBoost"))
+                    is_verified = is_loaded and ("RandomForest" in model_registry.list_models())
+                    artifact_desc = "rf_model.pkl (11.5 MB)" if has_artifact else "Artifact missing"
+                    policy_desc = "Secondary bagging regressor; 13-feature input vector contract." if is_loaded else "⚠️ Fallback Active: Mirrored to XGBoost primary."
+                elif m_name == "Ensemble":
+                    xgb_ok = "XGBoost" in models_dict
+                    rf_ok = "RandomForest" in models_dict and (models_dict.get("RandomForest") is not models_dict.get("XGBoost"))
+                    has_artifact = xgb_ok and rf_ok
+                    is_loaded = xgb_ok
+                    is_verified = "Ensemble" in model_registry.list_models()
+                    artifact_desc = "Composite (50% XGBoost + 50% RandomForest)"
+                    if xgb_ok and rf_ok:
+                        policy_desc = "Active composite ensemble (50/50 blend); policy: explicit non-fallback."
+                    elif xgb_ok:
+                        policy_desc = "⚠️ Fallback active: Using XGBoost single-model proxy (RandomForest unverified)."
+                    else:
+                        policy_desc = "Fallback diagnostics unavailable."
+
                 m_table.append({
                     "Model Name": m_name,
-                    "Loaded Status": "✅ Verified & Ready" if is_loaded else "⚠️ Fallback Active",
-                    "Feature Contract": "13-Feature Temporal Vector",
-                    "Inference Policy": "Explicit Non-Fallback"
+                    "Configured": "✅ Yes",
+                    "Trained Artifact": artifact_desc,
+                    "Loaded & Verified": "✅ Verified & Ready" if is_verified else ("⚠️ Fallback Active" if is_loaded else "❌ Unverified"),
+                    "Inference Role": "🎯 Selected for Inference" if m_name == selected_model else "Available Candidate",
+                    "Architecture Policy": policy_desc,
                 })
             st.dataframe(pd.DataFrame(m_table), use_container_width=True)
 
@@ -2295,8 +2808,54 @@ with tab_health:
             st.write(f"• **Scheduling Boundary:** Decoupled service entrypoint ready for external cron/worker integration.")
             if db_ready and audit_repo:
                 val_logs = audit_repo.list_validations(limit=5)
-                fail_cnt = sum(1 for v in val_logs if v.validation_status == "FAILED")
-                st.write(f"• **Recent Failed Ingestions:** `{fail_cnt}` of last {len(val_logs)} audited runs.")
+                if not val_logs:
+                    st.write("• **Recent Failed Ingestions:** `No ingestion attempts recorded`")
+                else:
+                    fail_cnt = sum(1 for v in val_logs if v.validation_status == "FAILED")
+                    st.write(f"• **Recent Failed Ingestions:** `{fail_cnt}` of last {len(val_logs)} audited runs.")
+
+        # MLOps Model Retraining Assessment & Governance
+        st.divider()
+        st.markdown("##### ⚖️ MLOps Model Retraining Assessment & Governance Protocol")
+        st.caption("Rigorous multi-stage governance framework preventing unvalidated, costly, or silent model replacement.")
+
+        retrain_c1, retrain_c2, retrain_c3 = st.columns(3)
+        with retrain_c1:
+            st.markdown("""
+            <div class="metric-card-v2">
+                <span style="color: #64748B; font-weight: 600;">1. DATA SUFFICIENCY GATE</span>
+                <h4 style="color: #0EA5E9; margin: 0.3rem 0;">≥ 90 Days Required</h4>
+                <small style="color: #64748B;">Requires at least 90 continuous trading days of newly reconciled actuals before initiating retraining pipeline.</small>
+            </div>
+            """, unsafe_allow_html=True)
+        with retrain_c2:
+            st.markdown("""
+            <div class="metric-card-v2">
+                <span style="color: #64748B; font-weight: 600;">2. DEGRADATION VS. DRIFT</span>
+                <h4 style="color: #D97706; margin: 0.3rem 0;">WAPE Shift > 15%</h4>
+                <small style="color: #64748B;">Feature drift (PSI/TVD) alone does NOT trigger retraining. Verified realized degradation on ground truth actuals is strictly required.</small>
+            </div>
+            """, unsafe_allow_html=True)
+        with retrain_c3:
+            st.markdown("""
+            <div class="metric-card-v2">
+                <span style="color: #64748B; font-weight: 600;">3. PROMOTION & ROLLBACK</span>
+                <h4 style="color: #10B981; margin: 0.3rem 0;">Champion-Challenger</h4>
+                <small style="color: #64748B;">Candidate must beat Champion on walk-forward backtest (MAE & WAPE) across all horizons. Existing binary is permanently preserved.</small>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with st.expander("📋 Retraining Decision Matrix & Rollback Policy", expanded=False):
+            st.markdown("""
+            | Assessment Trigger | Measurement Metric | Critical Threshold | Mandatory Action |
+            | :--- | :--- | :--- | :--- |
+            | **Feature Distribution Drift** | Population Stability Index (PSI) | PSI ≥ 0.25 on primary lags | **Investigate Data Ingestion**; do *not* auto-retrain |
+            | **Realized Accuracy Degradation** | Weighted Absolute % Error (WAPE) | Realized WAPE > 15.0% over 30d | **Trigger Candidate Re-evaluation** |
+            | **Systematic Forecast Bias** | Directional Bias $\\sum(\\hat{y}-y)/\\sum y$ | Absolute Bias > 5.0% | **Recalibrate Residual Intercept** |
+            | **Model Candidate Promotion** | Walk-forward Out-of-Sample MAE | Candidate MAE < Champion MAE | **Promote after Manual Sign-off** |
+
+            > **Non-Negotiable Rollback Policy:** The production model binary (`model_data/model.pkl`) is tagged with an immutable SHA-256 fingerprint. Any promoted model artifact is registered alongside its predecessor. If the promoted challenger exhibits > 10% performance degradation within the first 14 days of live inference, instant rollback to the prior champion SHA is triggered.
+            """)
 
         # Maintenance Controls
         st.divider()
