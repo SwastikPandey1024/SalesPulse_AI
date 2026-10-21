@@ -213,8 +213,27 @@ class DataMonitoringService:
             obs_dt = latest_obs
 
         # Calculate calendar staleness
-        delta_days = max(0, (ref_date - obs_dt).days)
-        is_stale = delta_days > config.staleness_threshold_days
+        delta_days = max(0, (ref_date - obs_dt).days) if (ref_date and obs_dt) else None
+
+        # Check explicit historical demo configuration
+        if getattr(config, "is_historical_demo", False):
+            obs_iso = obs_dt.isoformat() if obs_dt else None
+            return DataFreshnessReport(
+                freshness_state=FreshnessState.NOT_APPLICABLE,
+                latest_observation_date=obs_iso,
+                staleness_days=delta_days,
+                staleness_threshold_days=config.staleness_threshold_days,
+                cadence=cadence_str,
+                is_stale=False,
+                zero_sales_dates_count=zero_sales_count,
+                reference_date=ref_date.isoformat(),
+                assessment=(
+                    f"Historical demonstration dataset (Observation: {obs_iso}). "
+                    f"Live feed freshness SLA is NOT APPLICABLE."
+                ),
+            )
+
+        is_stale = (delta_days > config.staleness_threshold_days) if delta_days is not None else False
         state = FreshnessState.STALE if is_stale else FreshnessState.FRESH
 
         assessment = (
@@ -243,6 +262,7 @@ class DataMonitoringService:
         """Evaluate validation outcomes and failure runs from audit logs."""
         latest_attempt = stats.get("latest_attempt")
         last_success = stats.get("last_successful_attempt")
+        last_failure = stats.get("last_failed_attempt")
         consecutive_failures = stats.get("consecutive_failures", 0)
         hist_failures = stats.get("historical_failure_count", 0)
         hist_successes = stats.get("historical_success_count", 0)
@@ -254,6 +274,7 @@ class DataMonitoringService:
                 outcome=IngestionOutcome.NO_ATTEMPTS,
                 latest_attempt_at=None,
                 last_successful_ingestion_at=None,
+                last_failure_at=last_failure.created_at.isoformat() if last_failure and last_failure.created_at else None,
                 consecutive_failures=0,
                 historical_failure_count=0,
                 historical_success_count=0,
@@ -300,6 +321,7 @@ class DataMonitoringService:
             outcome=outcome,
             latest_attempt_at=latest_attempt.created_at.isoformat() if latest_attempt.created_at else None,
             last_successful_ingestion_at=last_success.created_at.isoformat() if last_success and last_success.created_at else None,
+            last_failure_at=last_failure.created_at.isoformat() if last_failure and last_failure.created_at else None,
             consecutive_failures=consecutive_failures,
             historical_failure_count=hist_failures,
             historical_success_count=hist_successes,
@@ -329,7 +351,8 @@ class DataMonitoringService:
         2. Trustworthy Baseline Absence -> UNKNOWN (or CRITICAL if latest attempt failed on uninitialized baseline)
         3. CRITICAL: Consecutive failures >= threshold, latest ingestion FAILED, or severe staleness (> crit_staleness)
         4. WARNING: Moderate staleness (> threshold), latest ingestion WARNING, or active validation warnings
-        5. HEALTHY: All signals present, verified, observations fresh, and latest attempt passed
+        5. UNKNOWN: Ingestion not evaluated or no attempts recorded (missing evidence must not default to HEALTHY)
+        6. HEALTHY: All signals present, verified, observations fresh, and latest attempt passed
         """
         remediations: List[str] = []
         crit_staleness = int(config.staleness_threshold_days * config.critical_staleness_multiplier)
@@ -388,6 +411,33 @@ class DataMonitoringService:
                 "Critical Ingestion Alert: Most recent dataset upload failed validation and was rejected.",
             )
 
+        # Level 3.5: Historical demonstration dataset handling (live staleness thresholds do not apply)
+        if freshness.freshness_state == FreshnessState.NOT_APPLICABLE:
+            if ingestion.outcome == IngestionOutcome.FAILED:
+                return (
+                    MonitoringStatus.CRITICAL,
+                    ["Review Data Quality audit findings and remediate blocking contract violations."],
+                    "Critical Ingestion Alert: Historical dataset upload failed validation and was rejected.",
+                )
+            elif ingestion.outcome == IngestionOutcome.WARNING:
+                return (
+                    MonitoringStatus.WARNING,
+                    ["Inspect non-blocking data quality warnings in the Data Quality workspace."],
+                    f"Historical Demo Warning: Ingestion passed with {ingestion.recent_warnings_count} review flag(s).",
+                )
+            elif ingestion.outcome == IngestionOutcome.NO_ATTEMPTS:
+                return (
+                    MonitoringStatus.UNKNOWN,
+                    ["Ingest and validate the demonstration dataset in Data Quality to establish audit history."],
+                    f"Historical demonstration dataset loaded (Observation: {freshness.latest_observation_date}). No ingestion execution audited; live feed SLA is NOT APPLICABLE.",
+                )
+            elif ingestion.outcome == IngestionOutcome.PASSED:
+                return (
+                    MonitoringStatus.HEALTHY,
+                    [],
+                    f"Historical demonstration dataset is validated and available (Latest observation: {freshness.latest_observation_date}). Live feed SLA is NOT APPLICABLE.",
+                )
+
         if freshness.staleness_days is not None and freshness.staleness_days > crit_staleness:
             remediations.append(
                 f"Ingest fresh data immediately. Dataset is {freshness.staleness_days} days stale (critical threshold: {crit_staleness} days)."
@@ -425,7 +475,7 @@ class DataMonitoringService:
                 f"Data Quality Warning: {ingestion.recent_warnings_count} quality review flag(s) active.",
             )
 
-        # Level 5: HEALTHY (Strictly when all signals are verified, fresh, and passing)
+        # Level 5: HEALTHY (When observations are fresh, no consecutive failures, and no warnings)
         if (
             freshness.freshness_state == FreshnessState.FRESH
             and freshness.staleness_days is not None
@@ -434,10 +484,17 @@ class DataMonitoringService:
             and ingestion.consecutive_failures == 0
             and ingestion.recent_warnings_count == 0
         ):
+            if ingestion.outcome == IngestionOutcome.NO_ATTEMPTS:
+                msg = (
+                    f"Observations are fresh ({freshness.staleness_days}d old, {cadence_label} cadence). "
+                    f"No ingestion audit attempts recorded (contracts not evaluated; absence of failure)."
+                )
+            else:
+                msg = f"Data pipeline is healthy: observations are fresh ({freshness.staleness_days}d old) and ingestion satisfies all contracts ({cadence_label} cadence)."
             return (
                 MonitoringStatus.HEALTHY,
                 [],
-                f"Data pipeline is healthy: observations are fresh ({freshness.staleness_days}d old) and ingestion satisfies all contracts ({cadence_label} cadence).",
+                msg,
             )
 
         # Fallback if any unverified state

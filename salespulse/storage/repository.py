@@ -12,7 +12,7 @@ import datetime
 import math
 from typing import Optional, List, Dict, Any, Tuple, Union
 import numpy as np
-from sqlalchemy import select, update, and_, func
+from sqlalchemy import select, update, and_, or_, func
 from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.engine import Engine
 from salespulse.storage.database import get_engine, get_db_session
@@ -964,6 +964,19 @@ class AuditRepository:
                     .limit(1)
                 ).scalar_one_or_none()
 
+            # Find last failed ingestion
+            last_failure = next(
+                (log for log in recent_logs if log.validation_status == "FAILED" or not log.is_usable),
+                None
+            )
+            if last_failure is None and recent_logs:
+                last_failure = s.execute(
+                    select(DatasetAuditLog)
+                    .where(or_(DatasetAuditLog.validation_status == "FAILED", DatasetAuditLog.is_usable.is_(False)))
+                    .order_by(DatasetAuditLog.created_at.desc())
+                    .limit(1)
+                ).scalar_one_or_none()
+
             # Calculate consecutive failures from latest attempt backward
             consecutive_failures = 0
             for log in recent_logs:
@@ -1023,6 +1036,7 @@ class AuditRepository:
             return {
                 "latest_attempt": latest_attempt,
                 "last_successful_attempt": last_success,
+                "last_failed_attempt": last_failure,
                 "consecutive_failures": consecutive_failures,
                 "historical_failure_count": historical_failure_count,
                 "historical_success_count": historical_success_count,

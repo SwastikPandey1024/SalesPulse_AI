@@ -272,6 +272,67 @@ class DataMonitoringRecord(Base):
         Index("idx_mon_status", "status"),
     )
 
+    @property
+    def freshness_state(self) -> str:
+        """Canonical freshness state adapter for UI and evaluation consumers.
+
+        Evaluates evidence_json first, then falls back safely to recorded signals.
+        Preserves UNKNOWN, STALE, CRITICAL, and FRESH states.
+        Never infers HEALTHY/FRESH merely because the field or evidence is missing.
+        """
+        # 1. Check evidence_json payload if present
+        if self.evidence_json:
+            try:
+                import json
+                ev = json.loads(self.evidence_json)
+                if isinstance(ev, dict):
+                    fresh = ev.get("freshness")
+                    if isinstance(fresh, dict):
+                        st_val = fresh.get("freshness_state") or fresh.get("state")
+                        if st_val:
+                            return str(st_val).upper()
+            except Exception:
+                pass
+
+        # 2. Strict evaluation based on recorded observation date and staleness
+        if self.latest_observation_date is None or self.staleness_days is None:
+            return "UNKNOWN"
+
+        thresh = self.staleness_threshold_days or 30
+        if self.staleness_days > thresh:
+            return "STALE"
+
+        if self.status == "HEALTHY":
+            return "FRESH"
+        elif self.status == "WARNING":
+            return "FRESH"
+        elif self.status == "CRITICAL":
+            # If critical status, check if staleness caused it
+            if self.staleness_days > thresh:
+                return "STALE"
+            return "FAILED"
+
+        return "UNKNOWN"
+
+    @property
+    def latest_ingestion_outcome(self) -> str:
+        """Compatibility property providing the latest ingestion outcome string."""
+        if self.last_ingestion_status:
+            return str(self.last_ingestion_status)
+        if self.evidence_json:
+            try:
+                import json
+                ev = json.loads(self.evidence_json)
+                if isinstance(ev, dict):
+                    ing = ev.get("ingestion")
+                    if isinstance(ing, dict):
+                        out = ing.get("outcome")
+                        if out:
+                            return str(out)
+            except Exception:
+                pass
+        return "UNKNOWN"
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -279,6 +340,8 @@ class DataMonitoringRecord(Base):
             "checked_at": self.checked_at.isoformat() if self.checked_at else None,
             "sales_scope": self.sales_scope,
             "status": self.status,
+            "freshness_state": self.freshness_state,
+            "latest_ingestion_outcome": self.latest_ingestion_outcome,
             "last_successful_ingestion_at": self.last_successful_ingestion_at.isoformat() if self.last_successful_ingestion_at else None,
             "last_ingestion_attempt_at": self.last_ingestion_attempt_at.isoformat() if self.last_ingestion_attempt_at else None,
             "last_ingestion_status": self.last_ingestion_status,

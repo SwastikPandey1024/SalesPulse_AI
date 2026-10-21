@@ -22,6 +22,7 @@ class MonitoringStatus(str, Enum):
     WARNING = "WARNING"      # Minor staleness or non-blocking validation warnings
     CRITICAL = "CRITICAL"    # Severe staleness or recent/repeated ingestion failures
     UNKNOWN = "UNKNOWN"      # Database unavailable or no historical observations recorded
+    ERROR = "ERROR"          # The check itself encountered an execution or evaluation failure
 
 
 class FreshnessState(str, Enum):
@@ -30,6 +31,7 @@ class FreshnessState(str, Enum):
     STALE = "STALE"                # Latest observation older than threshold
     MISSING_DATA = "MISSING_DATA"  # No observations found for the evaluated scope
     EMPTY_DATASET = "EMPTY_DATASET"# Dataset exists but contains zero rows
+    NOT_APPLICABLE = "NOT_APPLICABLE" # Static historical demonstration dataset (not a live feed)
     UNKNOWN = "UNKNOWN"            # Freshness cannot be evaluated (e.g. database offline)
 
 
@@ -118,6 +120,7 @@ class MonitoringConfig:
     reference_date: Optional[datetime.date] = None
     sales_scope: str = "TOTAL_STORE"
     lookback_attempts: int = 20
+    is_historical_demo: bool = False
 
     def __post_init__(self):
         # Canonical validation boundary: convert to CadenceType or raise clear ValueError
@@ -150,9 +153,21 @@ class DataFreshnessReport:
     reference_date: str = ""                         # YYYY-MM-DD
     assessment: str = ""
 
+    @property
+    def state(self) -> FreshnessState:
+        """Canonical backward-compatibility alias for consumers referencing .state."""
+        return self.freshness_state
+
+    @property
+    def reason(self) -> str:
+        """Alias for assessment to maintain contract consistency across reporting consumers."""
+        return self.assessment
+
     def to_dict(self) -> Dict[str, Any]:
+        state_str = self.freshness_state.value if hasattr(self.freshness_state, "value") else str(self.freshness_state)
         return {
-            "freshness_state": self.freshness_state.value if hasattr(self.freshness_state, "value") else str(self.freshness_state),
+            "freshness_state": state_str,
+            "state": state_str,
             "latest_observation_date": self.latest_observation_date,
             "staleness_days": self.staleness_days,
             "staleness_threshold_days": self.staleness_threshold_days,
@@ -171,6 +186,7 @@ class IngestionHealthReport:
     outcome: IngestionOutcome
     latest_attempt_at: Optional[str] = None            # ISO-8601 UTC
     last_successful_ingestion_at: Optional[str] = None   # ISO-8601 UTC
+    last_failure_at: Optional[str] = None              # ISO-8601 UTC (separate last failure timestamp)
     consecutive_failures: int = 0
     historical_failure_count: int = 0                  # Total failures in lookback window
     historical_success_count: int = 0                  # Total successes in lookback window
@@ -183,11 +199,30 @@ class IngestionHealthReport:
     latest_issues_summary: List[Dict[str, Any]] = field(default_factory=list)
     assessment: str = ""
 
+    @property
+    def latest_outcome(self) -> IngestionOutcome:
+        """Canonical property representing the most recent ingestion outcome for reporting consumers."""
+        return self.outcome
+
+    @property
+    def state(self) -> IngestionOutcome:
+        """Backward-compatibility alias for consumers referencing .state."""
+        return self.outcome
+
+    @property
+    def reason(self) -> str:
+        """Alias for assessment to maintain cross-schema convention parity."""
+        return self.assessment
+
     def to_dict(self) -> Dict[str, Any]:
+        outcome_str = self.outcome.value if hasattr(self.outcome, "value") else str(self.outcome)
         return {
-            "outcome": self.outcome.value if hasattr(self.outcome, "value") else str(self.outcome),
+            "outcome": outcome_str,
+            "latest_outcome": outcome_str,
+            "state": outcome_str,
             "latest_attempt_at": self.latest_attempt_at,
             "last_successful_ingestion_at": self.last_successful_ingestion_at,
+            "last_failure_at": self.last_failure_at,
             "consecutive_failures": self.consecutive_failures,
             "historical_failure_count": self.historical_failure_count,
             "historical_success_count": self.historical_success_count,
@@ -199,6 +234,7 @@ class IngestionHealthReport:
             "latest_file_sha256": self.latest_file_sha256,
             "latest_issues_summary": self.latest_issues_summary,
             "assessment": self.assessment,
+            "reason": self.assessment,
         }
 
 
@@ -221,6 +257,27 @@ class MonitoringVerdict:
         return self.overall_status
 
     @property
+    def data_recency_state(self) -> FreshnessState:
+        """Dimension 1: How old the latest relevant observation is."""
+        return self.freshness.freshness_state
+
+    @property
+    def ingestion_execution_status(self) -> IngestionOutcome:
+        """Dimension 2: Success, failure, no attempts recorded, or unknown."""
+        return self.ingestion.outcome
+
+    @property
+    def contract_validation_status(self) -> str:
+        """Dimension 3: Data-contract validation (PASSED, WARNING, FAILED, or NOT_EVALUATED)."""
+        if self.ingestion.outcome == IngestionOutcome.PASSED:
+            return "PASSED"
+        elif self.ingestion.outcome == IngestionOutcome.WARNING:
+            return "WARNING"
+        elif self.ingestion.outcome == IngestionOutcome.FAILED:
+            return "FAILED"
+        return "NOT_EVALUATED"
+
+    @property
     def remediation_advice(self) -> str:
         """Single-string summary of actionable remediations."""
         return " | ".join(self.actionable_remediations) if self.actionable_remediations else ""
@@ -231,6 +288,10 @@ class MonitoringVerdict:
             "checked_at": self.checked_at,
             "sales_scope": self.sales_scope,
             "overall_status": self.overall_status.value if hasattr(self.overall_status, "value") else str(self.overall_status),
+            "status": self.overall_status.value if hasattr(self.overall_status, "value") else str(self.overall_status),
+            "data_recency_state": self.data_recency_state.value if hasattr(self.data_recency_state, "value") else str(self.data_recency_state),
+            "ingestion_execution_status": self.ingestion_execution_status.value if hasattr(self.ingestion_execution_status, "value") else str(self.ingestion_execution_status),
+            "contract_validation_status": self.contract_validation_status,
             "freshness": self.freshness.to_dict(),
             "ingestion": self.ingestion.to_dict(),
             "actionable_remediations": self.actionable_remediations,
