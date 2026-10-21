@@ -4,7 +4,7 @@
 ### *Autonomous Sales Analytics, Multi-Horizon ML Forecasting, Observability & Executive Decision-Support*
 
 [![Release v3.0](https://img.shields.io/badge/Release-v3.0.0_Production-4F46E5?style=for-the-badge&logo=github)](https://github.com/SwastikPandey1024/SalesPulse_AI)
-[![Tests Passing](https://img.shields.io/badge/Tests-194_Passed-10B981?style=for-the-badge&logo=pytest)](https://github.com/SwastikPandey1024/SalesPulse_AI)
+[![Tests Passing](https://img.shields.io/badge/Tests-209_Passed-10B981?style=for-the-badge&logo=pytest)](https://github.com/SwastikPandey1024/SalesPulse_AI)
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/API-FastAPI_v0.115-009688?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Streamlit](https://img.shields.io/badge/UI-Streamlit_v1.43-FF4B4B?style=for-the-badge&logo=streamlit)](https://streamlit.io/)
@@ -13,7 +13,7 @@
 
 <br/>
 
-**[📖 Architecture Specs](docs/PRD.md)** • **[📡 Observability Guide](docs/OPERATOR_EXPERIENCE_AND_OBSERVABILITY.md)** • **[🌐 Deployment Guide](DEPLOYMENT.md)** • **[📋 Accounting Audit](data/processed/online_retail_ii_accounting_audit.json)**
+**[📖 Architecture Specs](docs/PRD.md)** • **[📡 Observability Guide](docs/OPERATOR_EXPERIENCE_AND_OBSERVABILITY.md)** • **[🖼️ Visual Walkthrough](docs/DASHBOARD_WALKTHROUGH.md)** • **[📐 Contracts](docs/INTEGRATION_CONTRACTS.md)** • **[🌐 Deployment](DEPLOYMENT.md)**
 
 </div>
 
@@ -54,29 +54,52 @@
 
 ---
 
-## 🖥️ The Six Operator Workspaces
+## 🖥️ Interactive Dashboard Preview & Operator Workspaces
 
-SalesPulse AI features six dedicated, purpose-built workspaces in `app.py`:
+SalesPulse AI features six dedicated, purpose-built workspaces in `app.py`. For complete high-resolution walkthroughs, see the **[🖼️ Dashboard Feature Walkthrough Guide](docs/DASHBOARD_WALKTHROUGH.md)**.
 
-### 1. 📊 Sales Overview
+> [!NOTE]
+> **Runtime & Demonstration Disclaimer:** The screenshots below are illustrative examples captured from the baseline evaluation environment running historical UCI Online Retail II demonstration data. Displayed KPI values, dates, and monitoring statuses represent captured snapshots and may differ from your current local runtime or newly ingested datasets.
+
+### 1. 📊 Sales Overview & Decision-Support Radar
 - **Commercial KPIs:** Net Realized Revenue, Gross Sales, Returns & Cancellations, Invoices/Orders, Average Order Value (AOV), Average Selling Price (ASP), Units Dispatched, and Return Rate (%).
-- **Executive Action Radar:** Deterministic recommendations derived from data actuals with severity badges (🔴 CRITICAL, 🟠 HIGH, 🔵 MEDIUM, ⚪ LOW).
 - **Time-Series Analysis:** Daily Net Sales with 7-day and 30-day moving average trendlines.
 - **Seasonality & Growth:** Month-over-Month (MoM) revenue growth tables and seasonality charts.
-- **Contribution Breakdown:** Top revenue-generating products and country revenue share pie charts.
+- **Contribution Breakdown:** Top revenue-generating products and country revenue share donut charts.
 - **Interactive Scenario Simulator:** Simulate promotional lift, price elasticity, and seasonal shifts.
 
-### 2. 🔮 Forecast Lab
+[![Sales Overview Workspace](media/sales-overview.png)](media/sales-overview.png)
+*Figure 1: Executive KPI banner, date range filtering, gross vs. net revenue breakdown, and dataset provenance badge. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+[![Executive Decision Support Radar](media/decision-intelligence-radar.png)](media/decision-intelligence-radar.png)
+*Figure 2: Executive Decision-Support Radar with 6 prioritized, evidence-backed commercial directives categorized by risk and impact. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+---
+
+### 2. 🔮 Production Forecast Lab
 - **Multi-Horizon Forecasting:** Recursive 7-day, 14-day, and 30-day rollout projections.
 - **Candidate Architectures:** XGBoost, Random Forest, and Ensemble blend via verified `ModelRegistry`.
 - **Prediction Uncertainty:** Choose between `Heuristic Sqrt-Step` ($\hat{y}_t \pm 1.96 \cdot \sigma_{\text{res}} \sqrt{h}$) and `Calibrated OOF Residuals` (empirical quantiles).
 - **Baseline Comparison:** Benchmark ML projections against the Seasonal Naive ($y_{t+h} = y_{t+h-7}$) recurrence standard.
-- **Audit Persistence:** Automatically persists run configuration, origin date, and step-level bounds to SQLite storage.
+- **Audit Persistence:** Automatically persists run configuration, origin date, and step-level bounds to SQLite storage with unique UUIDv4 run IDs.
+
+[![Production Forecast Lab](media/forecast-lab.png)](media/forecast-lab.png)
+*Figure 3: Multi-horizon recursive forecast generation (30-day projection) with candidate model selection, expanding uncertainty intervals, and run provenance logging. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+---
 
 ### 3. 🎯 Forecast Performance & Reconciliation
-- **Section A: Historical Out-of-Sample Backtesting:** 13 chronological rolling origins with strict target embargo. Displays MAE, RMSE, WAPE (Micro & Macro), Forecast Bias, and Interval Coverage.
-- **Section B: Ground-Truth Realized Performance:** Reconciles past forecasts against newly observed actuals stored in the database.
-- **Pending Realization Protocol:** Future forecast steps without ground truth remain explicitly marked as **Pending Realization** and are **never** filled with zero.
+- **Section A: Historical Out-of-Sample Backtesting:** 13 chronological rolling origins with strict target embargo. Displays MAE, RMSE, WAPE (Micro & Macro), Forecast Bias, and Interval Coverage comparing ML candidates against Seasonal-Naive.
+- **Section B: Ground-Truth Realized Performance:** Reconciles past forecasts against newly observed actuals stored in SQLite database.
+- **Pending Realization Safeguard:** Future forecast steps without ground truth remain explicitly marked as **Pending Realization** and are **never** filled with zero.
+
+[![Forecast Performance Backtest Benchmarks](media/forecast-performance.png)](media/forecast-performance.png)
+*Figure 4: Historical out-of-sample backtest benchmarks across 13 rolling origins comparing Candidate ML models against the Seasonal-Naive baseline. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+[![Ground-Truth Forecast Reconciliation](media/forecast-reconciliation.png)](media/forecast-reconciliation.png)
+*Figure 5: Ground-truth reconciliation protocol matching predictions against observed actuals with explicit 'Pending Realization' guards. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+---
 
 ### 4. 🛡️ Data Quality & Ingestion Operations
 - **Contract Ingestion:** Ingest raw CSV/Excel workbooks conforming to strict schema contracts.
@@ -84,16 +107,30 @@ SalesPulse AI features six dedicated, purpose-built workspaces in `app.py`:
 - **Data Freshness SLA:** Monitors days since last observation against configurable cadence thresholds (Daily, Hourly, Weekly).
 - **Dataset Drift Monitoring:** Evaluates feature-level Population Stability Index (PSI) and Total Variation Distance (TVD) against promoted reference baselines.
 
+[![Data Quality Workspace](media/data-quality.png)](media/data-quality.png)
+*Figure 6: Data quality workspace enforcing schema contracts, auditing dataset provenance/checksums, and isolating quarantined records. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+---
+
 ### 5. ⚠️ Explainable Time-Series Anomaly Monitor
 - **Statistical Engine:** 14-day rolling median baseline with Median Absolute Deviation (MAD) spread.
 - **Alert Typology:** Categorizes findings into `SALES_SURGE`, `SALES_DROP`, and `FORECAST_ERROR_ANOMALY`.
 - **Operator Triage:** Workflow to review, investigate, and mark anomalies as `ACTIVE` or `RESOLVED` with auditable resolution reasons.
-- **Seasonality Caveat Notice:** Prominent notice disclosing that intra-week variations may elevate z-scores, requiring operator contextual verification.
+- **Seasonality Disclosure:** Prominent notice disclosing that intra-week variations may elevate z-scores, requiring operator contextual verification.
 
-### 6. ⚙️ System Health & MLOps Control Center
+[![Explainable Anomaly Monitor](media/anomaly-monitor.png)](media/anomaly-monitor.png)
+*Figure 7: Time-series statistical anomaly monitor displaying surges, drops, and triage status across the full historical sales series. (Captured illustrative run; displayed figures may vary from live runtime.)*
+
+---
+
+### 6. ⚙️ System Health & MLOps Governance
 - **Database Diagnostics:** SQLite WAL mode status, schema version (`v2`), and audit log row counts.
 - **Model Inventory:** Verified candidate architectures, feature vector contracts (13 features), and explicit non-fallback policies.
+- **Honest Health Reporting:** Evaluates demo data truthfully, reporting `NOT APPLICABLE (HISTORICAL DEMO ARCHIVE)` instead of fabricating false green health checks.
 - **MLOps Retraining Governance:** Formal protocol outlining Data Sufficiency ($\ge 90$ days), Degradation vs. Drift policy, and Champion-Challenger promotion gates.
+
+[![System Health & MLOps Governance](media/system-health.png)](media/system-health.png)
+*Figure 8: 4-dimensional ingestion SLA health cards (truthful 'NOT APPLICABLE' demo state), verified ML model inventory, and retraining governance policy. (Captured illustrative run; displayed figures may vary from live runtime.)*
 
 ---
 
@@ -126,6 +163,20 @@ $$\text{Net Sales} = \text{Gross Sales} - \text{Realized Returns and Cancellatio
 - **Scope:** 9,994 retail orders spanning 2014–2017 across Furniture, Office Supplies, and Technology.
 - **Currency:** US Dollar ($ USD).
 - **Isolation Policy:** Superstore data and UK Online Retail data maintain separate namespaces and are **never** mixed into a single sales series.
+
+---
+
+## 🛡️ Data Transparency & Known Operational Boundaries
+
+### Data & Demo Mode Transparency
+SalesPulse AI explicitly distinguishes between static demonstration archives and live ingestion pipelines:
+- **Historical Demo State:** When operating with the included UCI Online Retail II dataset (spanning 2009–2011), the monitoring engine designates the Freshness SLA as `NOT APPLICABLE (HISTORICAL DEMO ARCHIVE)` rather than producing false green health alerts.
+- **Live Ingestion State:** Live cadence monitoring, freshness SLAs, and drift evaluation dynamically activate when users upload current tabular records or configure scheduled pipeline workers.
+
+### Documented Technical Boundaries
+- **Time-Series Seasonality Limitation:** The Anomaly Monitor uses a 14-day rolling median with MAD dispersion. It does *not* automatically stratify recurring intra-week patterns (e.g. Saturday retail surges vs. weekday lulls). Elevated z-scores (~1.8–2.5) on recurring high-volume days are statistical signals requiring operational domain triage, not confirmed defects.
+- **Compounding Forecast Uncertainty:** Recursive multi-step projections compound error variance over forward horizons. Prediction uncertainty bounds realistically expand with horizon step ($\sqrt{h}$); 30-day projection intervals are naturally wider than 7-day intervals.
+- **Database Boundary:** The standard distribution is configured for local SQLite in Write-Ahead Logging (WAL) mode for lightweight single-node performance. Multi-tenant or high-concurrency environments should connect to an external PostgreSQL instance via SQLAlchemy URL configuration.
 
 ---
 
@@ -189,7 +240,7 @@ Open your browser to `http://localhost:8501`.
 
 ### 4. Run the Optional FastAPI Daemon
 ```bash
-uvicorn salespulse.api.main:app --host 127.0.0.1 --port 8000 --reload
+uvicorn salespulse.api.app:app --host 127.0.0.1 --port 8000 --reload
 ```
 Interactive API documentation will be available at `http://127.0.0.1:8000/docs`.
 
@@ -197,17 +248,18 @@ Interactive API documentation will be available at `http://127.0.0.1:8000/docs`.
 
 ## 🧪 Scientific Validation & Test Suite
 
-The SalesPulse AI platform is backed by a rigorous test suite of **194 automated tests** covering domain contracts, time-series parsing, metric parity, drift detection, anomaly detection, persistence idempotency, and recommendation rules.
+The SalesPulse AI platform is backed by a rigorous test suite of **209 automated tests** covering domain contracts, time-series parsing, metric parity, drift detection, anomaly detection, persistence idempotency, monitoring status contracts, and recommendation rules.
 
 ```bash
 # Verify Python syntax and compilation
 python -m py_compile app.py
 
 # Execute the full pytest test suite
-pytest -v
+pytest -q
 ```
 
 ### Verified Test Breakdown:
+- `tests/test_observability_contract.py`: 11 passed (Monitoring contracts, 4D health synthesis, state precedence hierarchy, SQLite disconnection safety).
 - `tests/test_analytics.py`: 24 passed (Surge/Drop detection, MAD zero handling, Seasonality disclosure, DecisionSupportEngine rules).
 - `tests/test_drift.py`: 16 passed (PSI thresholds, TVD calculation, baseline profiling, sample sufficiency).
 - `tests/test_monitoring.py`: 19 passed (Freshness SLA, CadenceEnum parsing, consecutive failures, sanitization).
@@ -222,14 +274,15 @@ pytest -v
 - `tests/test_dashboard.py`: 5 passed (Dashboard service initialization, database offline fallback).
 - `tests/test_acceptance_remediation.py`: 30 passed (End-to-end acceptance across all 6 workspaces).
 
-**Total: 194 passed, 0 failures.**
+**Total: 209 passed, 0 failures.**
 
 ---
 
 ## 📄 License & Attribution
 
-- **Application Code:** Licensed under the [MIT License](LICENSE).
+- **Application Software:** Licensed under the [MIT License](LICENSE).
 - **UCI Online Retail II Dataset:** Distributed under the [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) license. Citation: Chen, D. (2012). Online Retail II [Dataset]. UCI Machine Learning Repository. https://doi.org/10.24432/C5BW33.
+- **Third-Party & Sample Data:** Sample datasets (e.g., US Superstore) and pre-trained demonstration artifacts are governed by their respective source licenses and terms as specified in [LICENSE](LICENSE).
 
 ---
 

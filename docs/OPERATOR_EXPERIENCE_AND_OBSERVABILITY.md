@@ -16,13 +16,24 @@ The operator experience is structured around 6 dedicated workspaces:
 
 ## 2. Workspace Navigation & Workflows
 
+> [!NOTE]
+> **Runtime Notice:** Workspace previews below illustrate captured system states during demonstration testing with the UCI Online Retail II dataset. Displayed figures, dates, metrics, and health statuses reflect specific recorded sessions and may differ across active runs, uploaded datasets, or local runtime environments.
+
 ### 2.1 Sales Overview Workspace
+
+[![Sales Overview Workspace](../media/sales-overview.png)](../media/sales-overview.png)
+*Figure 2.1: Sales Overview — Captured illustrative run; displayed figures and dates reflect a demonstration state and may vary at live runtime.*
+
 - **Executive KPIs:** Live summaries of Total Realized Revenue, Transaction Volume, Average Order Value (AOV), and Top Product Category.
 - **Continuous Daily Trend:** Time-series plot of reindexed daily sales paired with a 7-day rolling moving average.
 - **Business Scenario Simulator:** Operator levers for Promotional Campaign Boost (0–50%), Price Adjustment (-20% to +20%), and Seasonal Multiplier (0.5x to 1.5x), delivering instant revenue impact deltas and baseline comparisons.
 - **Model Benchmarks & Explainability:** Expandable walk-forward rolling-origin cross-validation metrics matrix and XGBoost feature importance rankings.
 
 ### 2.2 Forecast Lab Workspace
+
+[![Forecast Lab Workspace](../media/forecast-lab.png)](../media/forecast-lab.png)
+*Figure 2.2: Forecast Lab — Captured illustrative run; generated trajectory and prediction intervals reflect demonstration inputs.*
+
 - **Workflow:**
   1. Select Forecast Horizon (7, 14, or 30 days).
   2. Select Active Candidate Model (`XGBoost`, `RandomForest`, or `Ensemble`).
@@ -38,6 +49,13 @@ The operator experience is structured around 6 dedicated workspaces:
   - Actionable business recommendations (demand trajectory and 7-day moving average momentum).
 
 ### 2.3 Forecast Performance Workspace
+
+[![Forecast Performance Benchmarks](../media/forecast-performance.png)](../media/forecast-performance.png)
+*Figure 2.3a: Forecast Performance Benchmarks — Captured illustrative run; 13-origin CV benchmarks reflect tested historical data and do not guarantee future performance.*
+
+[![Ground-Truth Forecast Reconciliation](../media/forecast-reconciliation.png)](../media/forecast-reconciliation.png)
+*Figure 2.3b: Ground-Truth Forecast Reconciliation — Captured illustrative run; realized metrics reflect matching actuals and pending realization guards.*
+
 - **Delayed Realization Protocol:**
   - Forecast items remain in state `Pending Realization (Awaiting Actuals)` until corresponding ground-truth actual sales are ingested.
   - **Missing actuals are NEVER treated as zero.** They are excluded from error calculations to prevent artificial distortion of MAE, RMSE, WAPE, or Bias.
@@ -51,6 +69,10 @@ The operator experience is structured around 6 dedicated workspaces:
 - **Operator Actuals Tool:** Form to ingest actual daily sales for a calendar date, automatically triggering cross-run reconciliation for all matching forecast items.
 
 ### 2.4 Data Quality Workspace
+
+[![Data Quality Workspace](../media/data-quality.png)](../media/data-quality.png)
+*Figure 2.4: Data Quality Workspace — Captured illustrative run; audited row counts and checksums reflect the ingested dataset.*
+
 - **Ingestion Protocol:** Accepts CSV or Excel tabular records. Safe ingestion automatically detects dataset grain (`TRANSACTION`, `DAILY_AGGREGATED`, `FEATURE_BATCH`).
 - **Data Freshness & Ingestion Monitoring (Phase 4A & 4A.1 Reliability Hardening):**
   - **Trustworthy Signals:** Evaluates last successful ingestion timestamp, latest attempt outcome, calendar observation freshness (staleness vs threshold), validation failure/warning counts, consecutive failure escalations, and historical reliability rate.
@@ -74,6 +96,10 @@ The operator experience is structured around 6 dedicated workspaces:
 - **Audit History:** Live table of recent validation runs querying `DatasetAuditLog`. Never stores raw tabular rows.
 
 ### 2.5 Anomaly Monitor Workspace
+
+[![Anomaly Monitor Workspace](../media/anomaly-monitor.png)](../media/anomaly-monitor.png)
+*Figure 2.5: Explainable Anomaly Monitor — Captured illustrative run; detected statistical anomalies reflect demonstration filters.*
+
 - **Statistical Detection Methodology:**
   - Baseline Center: 14-day rolling median ($C_t = \text{median}(S_{t-W}, \dots, S_{t-1})$).
   - Dispersion Scale: Scaled Median Absolute Deviation ($\text{MAD} \times 1.4826$), falling back to IQR scale or deterministic minimum if dispersion is zero.
@@ -82,16 +108,20 @@ The operator experience is structured around 6 dedicated workspaces:
     - `SALES_SURGE`: $z_t \ge k_{surge}$ ($+2.5$).
     - `SALES_DROP`: $z_t \le -k_{drop}$ ($-2.5$).
     - `FORECAST_ERROR_ANOMALY`: Extreme realized forecast error.
-- **Severity Levels:**
-  - `LOW`: $2.0 \le |z| < 2.5$
-  - `MEDIUM`: $2.5 \le |z| < 3.5$
-  - `HIGH`: $3.5 \le |z| < 5.0$
-  - `CRITICAL`: $|z| \ge 5.0$
+  - Severity Levels:
+    - `LOW`: $2.0 \le |z| < 2.5$
+    - `MEDIUM`: $2.5 \le |z| < 3.5$
+    - `HIGH`: $3.5 \le |z| < 5.0$
+    - `CRITICAL`: $|z| \ge 5.0$
 - **SEASONALITY LIMITATION NOTICE:**
   > **Important Operator Notice:** The 14-day rolling median baseline pools weekdays and weekends together without day-of-week stratification. Expected intra-week cyclical variations (e.g. Saturday retail surges or mid-week lulls) may register elevated z-scores (~1.8–2.5). Detected anomalies represent statistical signals for operational investigation, not confirmed root causes or automatically seasonally-adjusted facts.
 - **Operator Triage Workflow:** Operators can select any active anomaly, supply an operational rationale (e.g. "Confirmed flash promotion" or "Warehouse power failure"), and mark the anomaly as `RESOLVED`. The audit log records the resolution timestamp and rationale immutably.
 
 ### 2.6 System Health Workspace
+
+[![System Health Workspace](../media/system-health.png)](../media/system-health.png)
+*Figure 2.6: System Health Workspace — Captured illustrative run; displays truthful 'NOT APPLICABLE' for static demo data and may vary in live environments.*
+
 - **Diagnostic Probes:**
   - **Database Readiness:** Checks SQLite WAL connection and verifies active schema version matches application `SCHEMA_VERSION=2`.
   - **Data Freshness & Ingestion SLA:** Displays overall status, calendar staleness days relative to SLA, consecutive failures, and scheduling readiness.
